@@ -43,10 +43,12 @@ export const sensorService = {
             console.log(`[Sensor] ${type}: ${msg}`);
         };
 
-        // Connect to sensor
+        // Connect to sensor with better error handling
         RadarLogic.connect(SERIAL_PORT, BAUD_RATE).catch((error) => {
             console.error("Error connecting to sensor:", error);
             sensorService.isRunning = false;
+            // Don't throw - allow app to continue without sensor
+            // Sensor is optional for testing
         });
     },
 

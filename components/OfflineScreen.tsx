@@ -5,7 +5,7 @@ import { pairCodeService } from "@/src/services/pairCodeService";
 import { tokenService } from "@/src/services/tokenService";
 import { formatIranTime, formatPersianDate } from "@/src/utils/dateUtils";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ImageBackground, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { ImageBackground, SafeAreaView, StyleSheet, Text, View, StatusBar, Platform } from "react-native";
 
 interface OfflineScreenProps {
     onConnected?: () => void;
@@ -298,7 +298,8 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
 
     return (
         <ImageBackground source={require("@/assets/images/offlineMode.png")} style={styles.container} resizeMode="cover">
-            <SafeAreaView style={styles.safeArea}>
+            <StatusBar hidden={true} />
+            <View style={styles.safeArea}>
                 <View style={styles.content}>
                     <View style={styles.clockContainer}>
                         <Text style={styles.timeText}>{formatTime(time)}</Text>
@@ -319,7 +320,7 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
                         <Text style={styles.statusText}>{getStatusText()}</Text>
                     </View>
                 </View>
-            </SafeAreaView>
+            </View>
         </ImageBackground>
     );
 }
@@ -337,7 +338,7 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: "flex-start",
         alignItems: "center",
-        paddingTop: 100,
+        paddingTop: 50,
     },
     clockContainer: {
         alignItems: "center",

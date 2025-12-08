@@ -21,7 +21,11 @@
             },
             "edgeToEdgeEnabled": true,
             "predictiveBackGestureEnabled": false,
-            "package": "com.anonymous.SensorMonitor"
+            "package": "com.anonymous.SensorMonitor",
+            "navigationBar": {
+                "visible": "immersive"
+            },
+            "softwareKeyboardLayoutMode": "pan"
         },
         "web": {
             "output": "static",

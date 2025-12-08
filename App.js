@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { StyleSheet, View, ActivityIndicator, SafeAreaView } from "react-native";
+import { StyleSheet, View, ActivityIndicator, SafeAreaView, StatusBar, Platform } from "react-native";
+import { useFonts } from "expo-font";
+import * as SplashScreen from "expo-splash-screen";
 import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
@@ -7,14 +9,33 @@ import OfflineScreen from "./components/OfflineScreen";
 import { BridgeWebView } from "./src/components/BridgeWebView";
 import { sensorService } from "./src/services/sensorService";
 
+// Prevent splash screen from auto-hiding
+SplashScreen.preventAutoHideAsync();
+
 const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "https://vaal.pixlink.co";
+// const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "http://192.168.1.119:3000";
 
 export default function App() {
+    // Load custom fonts
+    const [fontsLoaded, fontError] = useFonts({
+        "YekanBakh-Regular": require("./assets/fonts/YekanBakh-Regular.ttf"),
+        "YekanBakh-SemiBold": require("./assets/fonts/YekanBakh-SemiBold.ttf"),
+        "YekanBakh-Light": require("./assets/fonts/YekanBakh-Light.ttf"),
+        "Michroma-Regular": require("./assets/fonts/Michroma-Regular.ttf"),
+    });
+
     const [screen, setScreen] = useState("loading");
     const [isChecking, setIsChecking] = useState(true);
     const activateIntervalRef = useRef(null);
     const networkCheckIntervalRef = useRef(null);
     const hasRegisteredRef = useRef(false);
+
+    // Hide splash screen when fonts are loaded
+    useEffect(() => {
+        if (fontsLoaded || fontError) {
+            SplashScreen.hideAsync();
+        }
+    }, [fontsLoaded, fontError]);
 
     // 1. بررسی اولیه هنگام باز شدن اپ
     useEffect(() => {
@@ -286,14 +307,20 @@ export default function App() {
         }
     }, [startWebViewMode]);
 
+    // Wait for fonts to load
+    if (!fontsLoaded && !fontError) {
+        return null;
+    }
+
     // Render
     if (isChecking) {
         return (
-            <SafeAreaView style={styles.container}>
+            <View style={styles.container}>
+                <StatusBar hidden={true} />
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#2962FF" />
                 </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
@@ -303,7 +330,8 @@ export default function App() {
 
     if (screen === "webview") {
         return (
-            <SafeAreaView style={styles.container}>
+            <View style={styles.container}>
+                <StatusBar hidden={true} />
                 <BridgeWebView
                     webViewUrl={WEBVIEW_URL}
                     onError={(error) => {
@@ -313,7 +341,7 @@ export default function App() {
                         startOfflineMode();
                     }}
                 />
-            </SafeAreaView>
+            </View>
         );
     }
 
