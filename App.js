@@ -1,294 +1,333 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView, StatusBar } from 'react-native';
-import RadarLogic from './RadarLogic';
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { StyleSheet, View, ActivityIndicator, SafeAreaView } from "react-native";
+import { networkService, tokenService, deviceService } from "./src/services";
+import { getAndroidId } from "./src/services/androidId";
+import { pairCodeService } from "./src/services/pairCodeService";
+import OfflineScreen from "./components/OfflineScreen";
+import { BridgeWebView } from "./src/components/BridgeWebView";
+import { sensorService } from "./src/services/sensorService";
 
-const SERIAL_PORT = '/dev/ttyS1';
-const BAUD_RATE = 115200;
+const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "https://vaal.pixlink.co";
 
 export default function App() {
-  const [connectionState, setConnectionState] = useState("Disconnected");
-  const [logs, setLogs] = useState([]);
+    const [screen, setScreen] = useState("loading");
+    const [isChecking, setIsChecking] = useState(true);
+    const activateIntervalRef = useRef(null);
+    const networkCheckIntervalRef = useRef(null);
+    const hasRegisteredRef = useRef(false);
 
-  // Sensor Data States
-  const [presence, setPresence] = useState(false);
-  const [distance, setDistance] = useState(0);
-  const [statusText, setStatusText] = useState("Waiting...");
+    // 1. بررسی اولیه هنگام باز شدن اپ
+    useEffect(() => {
+        checkInitialStatus();
 
-  // Config Data States
-  const [config, setConfig] = useState({ maxGate: '-', duration: '-' });
+        return () => {
+            // Cleanup intervals
+            if (activateIntervalRef.current) {
+                clearInterval(activateIntervalRef.current);
+            }
+            if (networkCheckIntervalRef.current) {
+                clearInterval(networkCheckIntervalRef.current);
+            }
+            sensorService.stopSensor();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-  useEffect(() => {
-    // 1. Setup Callbacks
-    RadarLogic.onLog = (msg, type) => addLog(msg, type);
+    const checkInitialStatus = async () => {
+        setIsChecking(true);
 
-    RadarLogic.onDataUpdate = (data) => {
-      setPresence(data.isPresence);
-      setDistance(data.distance);
-      setStatusText(data.statusText);
-      addLog(data.hex, 'data');
+        try {
+            // بررسی اتصال اینترنت
+            const isConnected = await networkService.isConnected();
+
+            if (!isConnected) {
+                // Offline → هدایت به OfflineScreen
+                setScreen("offline");
+                setIsChecking(false);
+                startOfflineMode();
+                return;
+            }
+
+            // Online → بررسی Token
+            const token = await tokenService.get();
+
+            if (!token) {
+                // بدون Token → OfflineScreen
+                setScreen("offline");
+                setIsChecking(false);
+                startOfflineMode();
+                return;
+            }
+
+            // Token وجود دارد → اعتبارسنجی
+            try {
+                await deviceService.auth();
+                // Token معتبر → WebviewScreen
+                setScreen("webview");
+                setIsChecking(false);
+                startWebViewMode();
+            } catch (error) {
+                const status = error?.response?.status;
+                if (status === 401) {
+                    // Token نامعتبر → حذف Token → OfflineScreen
+                    await tokenService.remove();
+                    await pairCodeService.remove();
+                    hasRegisteredRef.current = false;
+                    setScreen("offline");
+                    setIsChecking(false);
+                    startOfflineMode();
+                } else {
+                    // خطای دیگر → OfflineScreen
+                    setScreen("offline");
+                    setIsChecking(false);
+                    startOfflineMode();
+                }
+            }
+        } catch (error) {
+            console.error("Error in checkInitialStatus:", error);
+            setScreen("offline");
+            setIsChecking(false);
+            startOfflineMode();
+        }
     };
 
-    RadarLogic.onConfigRead = (cfg) => {
-      // Show only meters (Gate * 0.75)
-      const rangeInMeters = (cfg.maxGate * 0.75).toFixed(2);
+    // 3. حالت WebView - نمایش WebView و شروع سنسور
+    const startWebViewMode = useCallback(() => {
+        // سنسور در BridgeWebView شروع می‌شود
+        // اینجا فقط مطمئن می‌شویم که سنسور قبلی متوقف شده
+        sensorService.stopSensor();
+    }, []);
 
-      setConfig({
-        maxGate: `${rangeInMeters}m`,
-        duration: `${cfg.duration}s`
-      });
+    // 2. حالت Offline - Polling و بررسی شبکه
+    const startOfflineMode = useCallback(() => {
+        // بررسی Pair Code موجود
+        checkExistingPairCode();
+
+        // هر 3 ثانیه یکبار: تلاش برای فعال‌سازی
+        if (activateIntervalRef.current) {
+            clearInterval(activateIntervalRef.current);
+        }
+
+        activateIntervalRef.current = setInterval(async () => {
+            // بررسی Token قبل از هر تلاش
+            const existingToken = await tokenService.get();
+            if (existingToken) {
+                // Token دریافت شد → توقف Polling
+                if (activateIntervalRef.current) {
+                    clearInterval(activateIntervalRef.current);
+                    activateIntervalRef.current = null;
+                }
+                // بررسی اعتبار Token
+                try {
+                    await deviceService.auth();
+                    setScreen("webview");
+                    startWebViewMode();
+                } catch (error) {
+                    if (error?.response?.status === 401) {
+                        await tokenService.remove();
+                        await pairCodeService.remove();
+                        hasRegisteredRef.current = false;
+                    }
+                }
+                return;
+            }
+
+            // دریافت Pair Code
+            const pairCode = await pairCodeService.get();
+            if (!pairCode) {
+                // اگر Pair Code نداریم، ثبت دستگاه
+                if (!hasRegisteredRef.current) {
+                    registerDevice();
+                }
+                return;
+            }
+
+            // تلاش برای فعال‌سازی
+            try {
+                const response = await deviceService.activate({
+                    pair_code: pairCode,
+                });
+
+                const token = response.data?.token;
+                if (token) {
+                    // Token دریافت شد
+                    await tokenService.save(token);
+                    await pairCodeService.remove();
+
+                    // توقف Polling
+                    if (activateIntervalRef.current) {
+                        clearInterval(activateIntervalRef.current);
+                        activateIntervalRef.current = null;
+                    }
+
+                    // هدایت به WebviewScreen
+                    setScreen("webview");
+                    startWebViewMode();
+                }
+            } catch (error) {
+                const status = error?.response?.status;
+                if (status === 404) {
+                    // خطای Pair Code
+                    console.log("Invalid pair code");
+                    await pairCodeService.remove();
+                    hasRegisteredRef.current = false;
+                } else if (status === 400) {
+                    // دستگاه هنوز pending است → ادامه Polling
+                    // (بدون لاگ برای جلوگیری از spam)
+                } else {
+                    console.error("Error activating device:", error.message);
+                }
+            }
+        }, 3000); // هر 3 ثانیه
+
+        // هر 10 ثانیه: بررسی اتصال اینترنت
+        if (networkCheckIntervalRef.current) {
+            clearInterval(networkCheckIntervalRef.current);
+        }
+
+        networkCheckIntervalRef.current = setInterval(async () => {
+            const isConnected = await networkService.isConnected();
+            if (isConnected) {
+                // آنلاین شد → بررسی Token و اعتبارسنجی
+                const token = await tokenService.get();
+                if (token) {
+                    try {
+                        await deviceService.auth();
+                        // Token معتبر → هدایت به WebviewScreen
+                        if (activateIntervalRef.current) {
+                            clearInterval(activateIntervalRef.current);
+                            activateIntervalRef.current = null;
+                        }
+                        setScreen("webview");
+                        startWebViewMode();
+                    } catch (error) {
+                        if (error?.response?.status === 401) {
+                            await tokenService.remove();
+                            await pairCodeService.remove();
+                            hasRegisteredRef.current = false;
+                        }
+                    }
+                }
+            }
+        }, 10000); // هر 10 ثانیه
+    }, [startWebViewMode]);
+
+    const checkExistingPairCode = async () => {
+        try {
+            const existingToken = await tokenService.get();
+            if (existingToken) {
+                return;
+            }
+
+            const existingPairCode = await pairCodeService.get();
+            if (existingPairCode) {
+                // Pair Code موجود است، polling شروع می‌شود
+                return;
+            }
+
+            // اگر Pair Code نداریم، ثبت دستگاه
+            if (!hasRegisteredRef.current) {
+                registerDevice();
+            }
+        } catch (error) {
+            console.error("Error checking existing pair code:", error);
+        }
     };
 
-    // 2. Auto Connect on Start
-    handleConnect();
+    const registerDevice = async () => {
+        if (hasRegisteredRef.current) return;
 
-    return () => {
-      RadarLogic.disconnect();
+        try {
+            hasRegisteredRef.current = true;
+
+            const androidId = await getAndroidId();
+            const ipAddress = await networkService.getIpAddress();
+
+            const response = await deviceService.register({
+                serial: androidId,
+                app_version: "1.0.0",
+                ip_address: ipAddress || null,
+            });
+
+            const pairCode = response.data?.pair_code;
+            if (pairCode) {
+                await pairCodeService.save(pairCode);
+                console.log("Device registered. Pair code:", pairCode);
+            }
+        } catch (error) {
+            console.error("Error registering device:", error);
+            // Retry after 10 seconds
+            setTimeout(() => {
+                hasRegisteredRef.current = false;
+                registerDevice();
+            }, 10000);
+        }
     };
-  }, []);
 
-  const addLog = (message, type) => {
-    const time = new Date().toLocaleTimeString().split(' ')[0];
-    setLogs(prev => [`[${time}] ${message}`, ...prev].slice(0, 10));
-  };
+    const handleConnected = useCallback(async () => {
+        // وقتی آنلاین شد، بررسی Token و اعتبارسنجی
+        const token = await tokenService.get();
+        if (token) {
+            try {
+                await deviceService.auth();
+                if (activateIntervalRef.current) {
+                    clearInterval(activateIntervalRef.current);
+                    activateIntervalRef.current = null;
+                }
+                setScreen("webview");
+                startWebViewMode();
+            } catch (error) {
+                if (error?.response?.status === 401) {
+                    await tokenService.remove();
+                    await pairCodeService.remove();
+                    hasRegisteredRef.current = false;
+                }
+            }
+        }
+    }, [startWebViewMode]);
 
-  const handleConnect = async () => {
-    try {
-      setConnectionState("Connecting...");
-      await RadarLogic.connect(SERIAL_PORT, BAUD_RATE);
-      setConnectionState("Connected");
-    } catch (err) {
-      setConnectionState("Failed");
+    // Render
+    if (isChecking) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#2962FF" />
+                </View>
+            </SafeAreaView>
+        );
     }
-  };
 
-  const handleDisconnect = () => {
-    RadarLogic.disconnect();
-    setConnectionState("Disconnected");
-    setPresence(false);
-    setStatusText("Stopped");
-  };
+    if (screen === "offline") {
+        return <OfflineScreen onConnected={handleConnected} />;
+    }
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#121212" />
+    if (screen === "webview") {
+        return (
+            <SafeAreaView style={styles.container}>
+                <BridgeWebView
+                    webViewUrl={WEBVIEW_URL}
+                    onError={(error) => {
+                        console.error("WebView error:", error);
+                        // در صورت خطا، به OfflineScreen برگرد
+                        setScreen("offline");
+                        startOfflineMode();
+                    }}
+                />
+            </SafeAreaView>
+        );
+    }
 
-      {/* 1. Header */}
-      <View style={styles.header}>
-        <Text style={styles.appTitle}>ELEVATOR RADAR</Text>
-        <View style={[styles.statusBadge, { backgroundColor: connectionState === 'Connected' ? '#00C853' : '#D50000' }]}>
-          <Text style={styles.statusText}>{connectionState}</Text>
-        </View>
-      </View>
-
-      {/* 2. Main Dashboard (Compact Mode) */}
-      <View style={styles.dashboard}>
-
-        {/* Presence Indicator */}
-        <View style={[styles.presenceCard, { borderColor: presence ? '#00E676' : '#424242' }]}>
-          <Text style={styles.label}>HUMAN PRESENCE</Text>
-          <Text style={[styles.presenceValue, { color: presence ? '#00E676' : '#757575' }]}>
-            {presence ? "DETECTED" : "NOBODY"}
-          </Text>
-        </View>
-
-        {/* Info Grid */}
-        <View style={styles.grid}>
-          <View style={styles.gridItem}>
-            <Text style={styles.label}>DISTANCE</Text>
-            <Text style={styles.value}>{distance} <Text style={styles.unit}>cm</Text></Text>
-          </View>
-
-          <View style={styles.gridItem}>
-            <Text style={styles.label}>STATUS</Text>
-            <Text style={[styles.value, { fontSize: 16 }]}>{statusText}</Text>
-          </View>
-        </View>
-
-        {/* Configuration Display */}
-        <View style={styles.configBox}>
-          <Text style={styles.configTitle}>MODULE SETTINGS</Text>
-          <View style={styles.configRow}>
-            <Text style={styles.configText}>Max Range: <Text style={styles.configValue}>{config.maxGate}</Text></Text>
-            <Text style={styles.configText}>Delay: <Text style={styles.configValue}>{config.duration}</Text></Text>
-          </View>
-        </View>
-
-      </View>
-
-      {/* 3. Log Container (Takes remaining space) */}
-      <View style={styles.logContainer}>
-        <Text style={styles.logTitle}>RAW DATA STREAM</Text>
-        <ScrollView style={styles.logScroll}>
-          {logs.map((l, i) => (
-            <Text key={i} style={styles.logText}>{l}</Text>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* 4. Footer Buttons (Safe Area Protected) */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={[styles.btn, styles.btnConnect]} onPress={handleConnect} disabled={connectionState === 'Connected'}>
-          <Text style={styles.btnText}>START</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.btn, styles.btnDisconnect]} onPress={handleDisconnect}>
-          <Text style={styles.btnText}>STOP</Text>
-        </TouchableOpacity>
-      </View>
-
-    </SafeAreaView>
-  );
+    return null;
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: 30,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  appTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 15,
-  },
-  statusText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 10,
-    textTransform: 'uppercase',
-  },
-  dashboard: {
-    padding: 15,
-  },
-  presenceCard: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    marginBottom: 10,
-    borderWidth: 2,
-    elevation: 3,
-  },
-  label: {
-    color: '#888',
-    fontSize: 10,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  presenceValue: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  grid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  gridItem: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    padding: 12,
-    width: '48%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  value: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  unit: {
-    fontSize: 12,
-    color: '#666',
-  },
-  configBox: {
-    backgroundColor: '#263238',
-    borderRadius: 10,
-    padding: 12,
-  },
-  configTitle: {
-    color: '#90A4AE',
-    fontSize: 9,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  configRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  configText: {
-    color: '#B0BEC5',
-    fontSize: 12,
-  },
-  configValue: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  logContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    marginHorizontal: 15,
-    marginBottom: 10,
-    borderRadius: 10,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  logTitle: {
-    color: '#444',
-    fontSize: 9,
-    marginBottom: 4,
-  },
-  logScroll: {
-    flex: 1,
-  },
-  logText: {
-    color: '#00E676',
-    fontFamily: 'monospace',
-    fontSize: 10,
-    marginBottom: 2,
-  },
-  footer: {
-    flexDirection: 'row',
-    paddingHorizontal: 15,
-    paddingBottom: 80, // FIX: Increased padding significantly to avoid Android buttons
-    paddingTop: 15,
-    justifyContent: 'space-between',
-    backgroundColor: '#121212',
-  },
-  btn: {
-    flex: 1,
-    paddingVertical: 15, // Slightly taller button for easier touch
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 5,
-  },
-  btnConnect: {
-    backgroundColor: '#2962FF',
-  },
-  btnDisconnect: {
-    backgroundColor: '#37474F',
-  },
-  btnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
+    container: {
+        flex: 1,
+        backgroundColor: "#000",
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+    },
 });
