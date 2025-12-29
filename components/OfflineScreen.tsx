@@ -266,6 +266,7 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
             // Check token before each activation attempt
             const existingToken = await tokenService.get();
             if (existingToken) {
+                console.log("🔑 [TOKEN] Token found in storage:", existingToken);
                 addLog("✅ Token already exists, stopping activation polling");
                 if (activateIntervalRef.current) {
                     clearInterval(activateIntervalRef.current);
@@ -285,8 +286,10 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
                 });
 
                 const token = response.data.token;
+                console.log("🔑 [TOKEN] Token received from activate:", token);
 
                 if (token) {
+                    console.log("💾 [TOKEN] Saving token to storage:", token);
                     await tokenService.save(token);
                     await pairCodeService.remove();
 

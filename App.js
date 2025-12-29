@@ -72,6 +72,7 @@ export default function App() {
             // بررسی Token قبل از هر تلاش
             const existingToken = await tokenService.get();
             if (existingToken) {
+                console.log("🔑 [TOKEN] Token found in storage:", existingToken);
                 // Token دریافت شد → توقف Polling
                 if (activateIntervalRef.current) {
                     clearInterval(activateIntervalRef.current);
@@ -122,8 +123,10 @@ export default function App() {
                 // }
                 // Token is at: response.data.token
                 const token = response.data.token;
+                console.log("🔑 [TOKEN] Token received from activate:", token);
                 if (token) {
                     // Token دریافت شد
+                    console.log("💾 [TOKEN] Saving token to storage:", token);
                     await tokenService.save(token);
                     await pairCodeService.remove();
 
@@ -163,6 +166,7 @@ export default function App() {
             if (isConnected) {
                 // آنلاین شد → بررسی Token و اعتبارسنجی
                 const token = await tokenService.get();
+                console.log("🔑 [TOKEN] Token from storage:", token || "NO TOKEN");
                 if (token) {
                     try {
                         await deviceService.auth();
@@ -202,6 +206,7 @@ export default function App() {
 
             // Online → بررسی Token
             const token = await tokenService.get();
+            console.log("🔑 [TOKEN] Token from storage:", token || "NO TOKEN");
 
             if (!token) {
                 // بدون Token → OfflineScreen

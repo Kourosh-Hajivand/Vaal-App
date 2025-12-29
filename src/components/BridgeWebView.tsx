@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
+import { Platform } from "react-native";
 import { sensorService, SensorData } from "@/src/services/sensorService";
 import { tokenService } from "@/src/services/tokenService";
 
@@ -99,6 +100,27 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
     // Handle WebView load end - send token when page is loaded
     const handleLoadEnd = async () => {
         isWebViewReady.current = true;
+
+        // بررسی اینکه آیا استایل‌ها لود شده‌اند
+        webViewRef.current?.injectJavaScript(`
+            (function() {
+                const stylesheets = document.querySelectorAll('link[rel="stylesheet"]');
+                console.log('📄 Stylesheets found:', stylesheets.length);
+                stylesheets.forEach((link, index) => {
+                    const isLoaded = link.sheet !== null;
+                    console.log('📄 Stylesheet ' + index + ':', link.href, isLoaded ? '✅ loaded' : '❌ not loaded');
+                    if (!isLoaded) {
+                        // اگر استایل لود نشده، دوباره تلاش کن
+                        const newLink = document.createElement('link');
+                        newLink.rel = 'stylesheet';
+                        newLink.href = link.href;
+                        document.head.appendChild(newLink);
+                    }
+                });
+            })();
+            true;
+        `);
+
         // Wait a bit for WebView to be fully ready
         setTimeout(() => {
             sendTokenToWebView();
@@ -109,9 +131,9 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
         const { nativeEvent } = syntheticEvent;
         const errorCode = nativeEvent?.code;
         const errorDescription = nativeEvent?.description || "WebView error";
-        
+
         console.error("WebView error:", errorDescription, "Code:", errorCode);
-        
+
         // Don't trigger onError for network errors - let WebView retry
         // Only trigger for critical errors
         if (errorCode !== -2 && errorCode !== -6) {
@@ -136,6 +158,51 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
             domStorageEnabled={true}
             startInLoadingState={true}
             style={{ flex: 1 }}
+            // تنظیمات مهم برای لود شدن استایل‌ها
+            allowsInlineMediaPlayback={true}
+            mediaPlaybackRequiresUserAction={false}
+            mixedContentMode="always" // اجازه لود منابع HTTP در HTTPS
+            originWhitelist={["*"]} // اجازه به همه منابع
+            allowsBackForwardNavigationGestures={true}
+            cacheEnabled={true} // فعال کردن کش
+            cacheMode="LOAD_DEFAULT" // استفاده از کش
+            thirdPartyCookiesEnabled={true} // برای کوکی‌های شخص ثالث
+            sharedCookiesEnabled={true} // اشتراک کوکی‌ها
+            scalesPageToFit={true}
+            // User-Agent را تنظیم کن تا سرور استایل‌ها را بلاک نکند
+            userAgent={Platform.OS === "ios" ? "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" : "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36"}
+            // تنظیمات اضافی برای Android
+            {...(Platform.OS === "android" && {
+                androidLayerType: "hardware",
+                androidHardwareAccelerationDisabled: false,
+            })}
+            // تنظیمات اضافی برای iOS
+            {...(Platform.OS === "ios" && {
+                allowsLinkPreview: false,
+                decelerationRate: "normal",
+            })}
+            // Inject CSS قبل از لود شدن محتوا (برای اطمینان از لود شدن استایل‌ها)
+            injectedJavaScriptBeforeContentLoaded={`
+                (function() {
+                    // اضافه کردن meta tag برای viewport
+                    if (!document.querySelector('meta[name="viewport"]')) {
+                        const meta = document.createElement('meta');
+                        meta.name = 'viewport';
+                        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                        document.head.appendChild(meta);
+                    }
+                    
+                    // اضافه کردن meta tag برای charset
+                    if (!document.querySelector('meta[charset]')) {
+                        const meta = document.createElement('meta');
+                        meta.setAttribute('charset', 'UTF-8');
+                        document.head.appendChild(meta);
+                    }
+                    
+                    console.log('WebView content loading...');
+                })();
+                true;
+            `}
             // Inject script to listen for messages
             injectedJavaScript={`
                 (function() {

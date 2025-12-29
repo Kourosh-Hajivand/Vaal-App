@@ -6,7 +6,8 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
 import OfflineScreen from "./OfflineScreen";
 
-const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "https://vaal.pixlink.co";
+// const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "https://vaal.pixlink.co";
+const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "http://localhost:3000";
 
 export default function WebviewScreen() {
     const [isOnline, setIsOnline] = useState<boolean>(false);
