@@ -5,10 +5,16 @@ import { pairCodeService } from "@/src/services/pairCodeService";
 import { tokenService } from "@/src/services/tokenService";
 import { formatIranTime, formatPersianDate } from "@/src/utils/dateUtils";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ImageBackground, SafeAreaView, StyleSheet, Text, View, StatusBar, Platform } from "react-native";
+import { ImageBackground, SafeAreaView, StyleSheet, Text, View, StatusBar, Platform, ScrollView, TouchableOpacity } from "react-native";
 
 interface OfflineScreenProps {
-    onConnected?: () => void;
+    onConnected?: (onLog?: (message: string) => void) => void;
+}
+
+interface LogEntry {
+    id: number;
+    message: string;
+    timestamp: Date;
 }
 
 export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
@@ -16,8 +22,26 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
     const [pairCode, setPairCode] = useState<string | null>(null);
     const [isRegistering, setIsRegistering] = useState(false);
     const [isActivating, setIsActivating] = useState(false);
+    const [logs, setLogs] = useState<LogEntry[]>([]);
     const activateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const hasRegisteredRef = useRef(false);
+    const logIdRef = useRef(0);
+
+    // Helper function to add log to screen
+    const addLog = useCallback((message: string) => {
+        const logEntry: LogEntry = {
+            id: logIdRef.current++,
+            message: `${new Date().toLocaleTimeString()} - ${message}`,
+            timestamp: new Date(),
+        };
+        setLogs((prev) => {
+            const newLogs = [...prev, logEntry];
+            // Keep only last 50 logs
+            return newLogs.slice(-50);
+        });
+        // Also log to console
+        console.log(message);
+    }, []);
 
     // Check token and authenticate when online
     const checkTokenAndAuth = useCallback(async () => {
@@ -41,9 +65,9 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
             try {
                 const response = await deviceService.auth();
                 // If auth successful (not 401), trigger onConnected callback
-                console.log("✅ Token is valid");
+                addLog("✅ Token is valid");
                 if (onConnected) {
-                    onConnected();
+                    onConnected(addLog);
                 }
             } catch (error: any) {
                 // Check if it's 401 (Unauthorized)
@@ -116,10 +140,13 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
 
     // Auto-activate when pair code is available
     useEffect(() => {
-        if (pairCode && !isActivating) {
+        if (pairCode) {
+            addLog(`🔄 [POLLING] Pair code available: ${pairCode}, starting polling...`);
             startActivatePolling();
+        } else {
+            addLog("⚠️ [POLLING] No pair code available yet");
         }
-    }, [pairCode, isActivating]);
+    }, [pairCode]); // فقط وقتی pairCode تغییر کنه، polling رو شروع کن
 
     const checkTokenAndRegister = async () => {
         try {
@@ -206,44 +233,62 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
     };
 
     const startActivatePolling = () => {
-        console.log("🚀 Starting activate polling with pair code:", pairCode);
+        addLog(`🚀 [POLLING] Starting activate polling with pair code: ${pairCode}`);
 
         // Stop existing polling
         if (activateIntervalRef.current) {
+            addLog("🛑 [POLLING] Stopping existing polling interval...");
             clearInterval(activateIntervalRef.current);
+            activateIntervalRef.current = null;
+            addLog("✅ [POLLING] Existing polling stopped");
         }
 
-        // Start polling every 5 seconds (optimized for low-end devices)
+        // Start polling every 5 seconds
+        addLog("⏰ [ACTIVATE] Setting up polling interval (every 5 seconds)...");
         activateIntervalRef.current = setInterval(async () => {
-            if (!pairCode || isActivating) return;
+            addLog("🔄 [ACTIVATE] Polling tick - checking activation status...");
+
+            // Read pair code from storage in each tick (not from state closure)
+            const currentPairCode = await pairCodeService.get();
+            if (!currentPairCode) {
+                addLog("⚠️ [ACTIVATE] No pair code in storage, skipping polling");
+                return;
+            }
+
+            // اگر در حال activate هستیم، skip کن (اما polling ادامه داره)
+            if (isActivating) {
+                addLog("⏳ [ACTIVATE] Already activating, skipping this attempt (will retry in 5s)...");
+                return;
+            }
+
+            addLog(`🔄 [ACTIVATE] Ready to check activation for pair code: ${currentPairCode}`);
 
             // Check token before each activation attempt
             const existingToken = await tokenService.get();
             if (existingToken) {
-                console.log("✅ Token already exists, stopping activation polling");
+                addLog("✅ Token already exists, stopping activation polling");
                 if (activateIntervalRef.current) {
                     clearInterval(activateIntervalRef.current);
                     activateIntervalRef.current = null;
                 }
                 if (onConnected) {
-                    onConnected();
+                    onConnected(addLog);
                 }
                 return;
             }
 
             try {
                 setIsActivating(true);
+
                 const response = await deviceService.activate({
-                    pair_code: pairCode,
+                    pair_code: currentPairCode,
                 });
 
-                // If token received, save it and redirect
-                // Response structure: { data: { token: "..." }, status: "success", message: "..." }
-                const token = response.data?.token;
+                const token = response.data.token;
+
                 if (token) {
-                    console.log("✅ Device activated! Token received:", token.substring(0, 20) + "...");
                     await tokenService.save(token);
-                    await pairCodeService.remove(); // Clean up pair code
+                    await pairCodeService.remove();
 
                     // Stop polling
                     if (activateIntervalRef.current) {
@@ -252,30 +297,39 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
                     }
 
                     // Trigger onConnected callback to redirect to WebView
-                    console.log("🔄 Redirecting to WebView...");
                     if (onConnected) {
-                        onConnected();
+                        try {
+                            onConnected(addLog);
+                        } catch (callbackError: any) {
+                            addLog(`❌ [ACTIVATE] Error in onConnected callback: ${callbackError?.message || callbackError}`);
+                        }
                     }
-                } else {
-                    console.log("⏳ Device not activated yet, continuing polling...");
                 }
             } catch (error: any) {
                 // If device not activated yet, continue polling
                 // 404 = Invalid pair code
                 // 400 = Device not confirmed or pair code expired (expected)
+                addLog("❌ [ACTIVATE] Error caught in activation attempt");
+                addLog(`❌ [ACTIVATE] Error type: ${error?.constructor?.name || "Unknown"}`);
+                addLog(`❌ [ACTIVATE] Error message: ${error?.message || "No message"}`);
+                addLog(`❌ [ACTIVATE] Error response: ${error?.response ? JSON.stringify(error.response.data || error.response, null, 2).substring(0, 200) : "No response"}`);
+
                 const status = error.response?.status;
                 if (status === 404) {
-                    console.log("⚠️ Invalid pair code or device not found");
+                    addLog("⚠️ [ACTIVATE] Invalid pair code or device not found (404)");
                 } else if (status === 400) {
                     // This is expected - device is pending, admin hasn't confirmed yet
-                    // Don't log to avoid spam
+                    addLog("⏳ [ACTIVATE] Device pending confirmation (400) - continuing polling...");
                 } else {
-                    console.error("❌ Error activating device:", error.message || error);
+                    addLog(`❌ [ACTIVATE] Unexpected error: ${error.message || error}`);
                 }
             } finally {
+                addLog("🏁 [ACTIVATE] Setting isActivating to false - polling will continue");
                 setIsActivating(false);
             }
-        }, 3000); // Poll every 3 seconds
+        }, 5000); // Poll every 5 seconds
+
+        addLog("✅ [ACTIVATE] Polling started successfully");
     };
 
     const formatTime = (date: Date) => {
@@ -294,6 +348,33 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
             return "در انتظار تایید ادمین";
         }
         return "عدم اتصال به اینترنت";
+    };
+
+    // Temporary function to clear token and pair code for testing
+    const handleClearToken = async () => {
+        try {
+            addLog("🗑️ [DEBUG] Clearing token and pair code...");
+            await tokenService.remove();
+            await pairCodeService.remove();
+            setPairCode(null);
+            hasRegisteredRef.current = false;
+
+            // Stop polling
+            if (activateIntervalRef.current) {
+                clearInterval(activateIntervalRef.current);
+                activateIntervalRef.current = null;
+            }
+
+            addLog("✅ [DEBUG] Token and pair code cleared successfully");
+            addLog("🔄 [DEBUG] App will restart registration process...");
+
+            // Restart registration
+            setTimeout(() => {
+                checkTokenAndRegister();
+            }, 1000);
+        } catch (error: any) {
+            addLog(`❌ [DEBUG] Error clearing token: ${error?.message || error}`);
+        }
     };
 
     return (
@@ -319,6 +400,23 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
                         <View style={styles.statusDot} />
                         <Text style={styles.statusText}>{getStatusText()}</Text>
                     </View>
+
+                    {/* Temporary Clear Token Button */}
+                    {/* <TouchableOpacity style={styles.clearTokenButton} onPress={handleClearToken}>
+                        <Text style={styles.clearTokenButtonText}>🗑️ پاک کردن Token (موقت)</Text>
+                    </TouchableOpacity> */}
+
+                    {/* Debug Logs - Temporary */}
+                    {/* <View style={styles.logsContainer}>
+                        <Text style={styles.logsTitle}>Debug Logs:</Text>
+                        <ScrollView style={styles.logsScrollView} nestedScrollEnabled={true}>
+                            {logs.map((log) => (
+                                <Text key={log.id} style={styles.logText}>
+                                    {log.message}
+                                </Text>
+                            ))}
+                        </ScrollView>
+                    </View> */}
                 </View>
             </View>
         </ImageBackground>
@@ -402,5 +500,44 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: "#fff",
         fontFamily: "YekanBakh-Regular",
+    },
+    logsContainer: {
+        position: "absolute",
+        bottom: 20,
+        left: 10,
+        right: 10,
+        maxHeight: 200,
+        backgroundColor: "rgba(0, 0, 0, 0.8)",
+        borderRadius: 8,
+        padding: 10,
+    },
+    logsTitle: {
+        fontSize: 12,
+        color: "#fff",
+        fontFamily: "YekanBakh-SemiBold",
+        marginBottom: 5,
+    },
+    logsScrollView: {
+        maxHeight: 180,
+    },
+    logText: {
+        fontSize: 10,
+        color: "#00E676",
+        fontFamily: "YekanBakh-Regular",
+        marginBottom: 2,
+    },
+    clearTokenButton: {
+        marginTop: 15,
+        marginBottom: 10,
+        backgroundColor: "rgba(255, 0, 0, 0.7)",
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 8,
+    },
+    clearTokenButtonText: {
+        color: "#fff",
+        fontSize: 14,
+        fontFamily: "YekanBakh-SemiBold",
+        textAlign: "center",
     },
 });

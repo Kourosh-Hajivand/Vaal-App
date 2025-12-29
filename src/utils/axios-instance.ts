@@ -18,14 +18,19 @@ export const axiosInstance: AxiosInstance = axios.create({
 // Request Interceptor - برای اضافه کردن token
 axiosInstance.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
+        const fullUrl = `${config.baseURL}${config.url}`;
+        console.log(`📤 [REQUEST] ${config.method?.toUpperCase()} ${fullUrl}`);
+        if (config.data) {
+            console.log("📤 [REQUEST] Body:", JSON.stringify(config.data, null, 2));
+        }
+
         try {
             const token = await tokenStorage.get();
-
             if (token && config.headers) {
                 config.headers.Authorization = `Bearer ${token}`;
             }
         } catch (error) {
-            console.error("Error getting token in interceptor:", error);
+            console.error("❌ [AXIOS] Error getting token in interceptor:", error);
         }
 
         return config;
@@ -37,8 +42,22 @@ axiosInstance.interceptors.request.use(
 
 // Response Interceptor - برای handle کردن refresh token
 axiosInstance.interceptors.response.use(
-    (response: any) => response,
+    (response: any) => {
+        const fullUrl = `${response.config?.baseURL}${response.config?.url}`;
+        console.log(`📥 [RESPONSE] ${response.config?.method?.toUpperCase()} ${fullUrl} - Status: ${response.status}`);
+        console.log("📥 [RESPONSE] Data:", JSON.stringify(response.data, null, 2));
+        return response;
+    },
     async (error: AxiosError) => {
+        const fullUrl = `${error.config?.baseURL}${error.config?.url}`;
+        const status = error.response?.status || "NO STATUS";
+        console.error(`❌ [RESPONSE] ${error.config?.method?.toUpperCase()} ${fullUrl} - Status: ${status}`);
+        if (error.response?.data) {
+            console.error("❌ [RESPONSE] Error:", JSON.stringify(error.response.data, null, 2));
+        } else {
+            console.error("❌ [RESPONSE] Error message:", error.message);
+        }
+
         const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
         // اگر 401 بود و قبلاً retry نکردیم
