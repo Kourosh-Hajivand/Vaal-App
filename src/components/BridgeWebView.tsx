@@ -12,6 +12,8 @@ interface BridgeWebViewProps {
 export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
     const webViewRef = useRef<WebView>(null);
     const isWebViewReady = useRef(false);
+    const lastRefreshDateRef = useRef<string | null>(null);
+    const refreshCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Send token to WebView when it's ready
     const sendTokenToWebView = async () => {
@@ -66,6 +68,43 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
         return () => {
             // Stop sensor when WebView unmounts
             sensorService.stopSensor();
+        };
+    }, []);
+
+    // Auto-refresh WebView every day at 3 AM
+    useEffect(() => {
+        const checkAndRefresh = () => {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const today = now.toDateString(); // Format: "Mon Jan 01 2024"
+
+            // Check if it's 3 AM (between 3:00 and 3:01)
+            if (currentHour === 3 && currentMinute === 0) {
+                // Check if we haven't refreshed today
+                if (lastRefreshDateRef.current !== today) {
+                    console.log("🔄 [AUTO-REFRESH] Refreshing WebView at 3 AM");
+                    lastRefreshDateRef.current = today;
+
+                    // Reload WebView
+                    if (webViewRef.current) {
+                        webViewRef.current.reload();
+                    }
+                }
+            }
+        };
+
+        // Check immediately
+        checkAndRefresh();
+
+        // Check every minute
+        refreshCheckIntervalRef.current = setInterval(checkAndRefresh, 60000); // 60000ms = 1 minute
+
+        return () => {
+            if (refreshCheckIntervalRef.current) {
+                clearInterval(refreshCheckIntervalRef.current);
+                refreshCheckIntervalRef.current = null;
+            }
         };
     }, []);
 
@@ -164,8 +203,7 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
             mixedContentMode="always" // اجازه لود منابع HTTP در HTTPS
             originWhitelist={["*"]} // اجازه به همه منابع
             allowsBackForwardNavigationGestures={true}
-            cacheEnabled={true} // فعال کردن کش
-            cacheMode="LOAD_DEFAULT" // استفاده از کش
+            cacheEnabled={true} // فعال کردن کش (کش در اپ وب هندل میشه)
             thirdPartyCookiesEnabled={true} // برای کوکی‌های شخص ثالث
             sharedCookiesEnabled={true} // اشتراک کوکی‌ها
             scalesPageToFit={true}

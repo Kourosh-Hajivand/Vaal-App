@@ -40,9 +40,9 @@ export default function App() {
     }, [fontsLoaded, fontError]);
 
     // Update screenRef whenever screen changes
-    // useEffect(() => {
-    //     screenRef.current = screen;
-    // }, [screen]);
+    useEffect(() => {
+        screenRef.current = screen;
+    }, [screen]);
 
     // 3. حالت WebView - نمایش WebView و شروع سنسور
     const startWebViewMode = useCallback(() => {
@@ -315,20 +315,26 @@ export default function App() {
             console.log("🌐 Network status changed:", isConnected ? "Connected" : "Disconnected");
 
             if (!isConnected) {
-                // اینترنت قطع شد → اگر در WebView هستیم، به OfflineScreen برگرد
+                // اینترنت قطع شد → اگر در WebView هستیم و token داریم، در WebView بمون و از کش استفاده کن
                 if (screenRef.current === "webview") {
-                    console.log("⚠️ Internet disconnected, switching to OfflineScreen");
-                    // توقف intervals در App.js (OfflineScreen خودش polling رو شروع میکنه)
-                    if (activateIntervalRef.current) {
-                        clearInterval(activateIntervalRef.current);
-                        activateIntervalRef.current = null;
+                    const token = await tokenService.get();
+                    if (token) {
+                        console.log("⚠️ Internet disconnected, but staying in WebView with cached content");
+                        // در WebView بمون و از کش استفاده کن - نیازی به تغییر screen نیست
+                        return;
+                    } else {
+                        // اگر token نداریم، به OfflineScreen برگرد
+                        console.log("⚠️ Internet disconnected, no token, switching to OfflineScreen");
+                        if (activateIntervalRef.current) {
+                            clearInterval(activateIntervalRef.current);
+                            activateIntervalRef.current = null;
+                        }
+                        if (networkCheckIntervalRef.current) {
+                            clearInterval(networkCheckIntervalRef.current);
+                            networkCheckIntervalRef.current = null;
+                        }
+                        setScreen("offline");
                     }
-                    if (networkCheckIntervalRef.current) {
-                        clearInterval(networkCheckIntervalRef.current);
-                        networkCheckIntervalRef.current = null;
-                    }
-                    setScreen("offline");
-                    // OfflineScreen خودش polling رو شروع میکنه، نیازی به startOfflineMode نیست
                 }
             } else {
                 // اینترنت وصل شد → بررسی Token
@@ -518,18 +524,25 @@ export default function App() {
                     webViewUrl={WEBVIEW_URL}
                     onError={(error) => {
                         console.error("WebView error:", error);
-                        // Cleanup intervals قبل از تغییر screen
-                        if (activateIntervalRef.current) {
-                            clearInterval(activateIntervalRef.current);
-                            activateIntervalRef.current = null;
+                        // فقط برای خطاهای critical به OfflineScreen برگرد
+                        // خطاهای network رو ignore کن تا از کش استفاده کنه
+                        const isNetworkError = error?.message?.includes("network") || error?.message?.includes("ERR_INTERNET_DISCONNECTED") || error?.message?.includes("ERR_ADDRESS_UNREACHABLE");
+
+                        if (!isNetworkError) {
+                            // فقط برای خطاهای غیر network به OfflineScreen برگرد
+                            console.log("⚠️ Critical WebView error, switching to OfflineScreen");
+                            if (activateIntervalRef.current) {
+                                clearInterval(activateIntervalRef.current);
+                                activateIntervalRef.current = null;
+                            }
+                            if (networkCheckIntervalRef.current) {
+                                clearInterval(networkCheckIntervalRef.current);
+                                networkCheckIntervalRef.current = null;
+                            }
+                            setScreen("offline");
+                        } else {
+                            console.log("⚠️ Network error in WebView, will use cached content");
                         }
-                        if (networkCheckIntervalRef.current) {
-                            clearInterval(networkCheckIntervalRef.current);
-                            networkCheckIntervalRef.current = null;
-                        }
-                        // در صورت خطا، به OfflineScreen برگرد
-                        setScreen("offline");
-                        // OfflineScreen خودش polling رو شروع میکنه، نیازی به startOfflineMode نیست
                     }}
                 />
             </View>
