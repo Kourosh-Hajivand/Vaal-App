@@ -29,6 +29,7 @@ export default function App() {
     const activateIntervalRef = useRef(null);
     const networkCheckIntervalRef = useRef(null);
     const networkUnsubscribeRef = useRef(null);
+    const tokenValidationIntervalRef = useRef(null); // برای چک کردن token هر 10 دقیقه
     const hasRegisteredRef = useRef(false);
     const screenRef = useRef("loading");
 
@@ -49,6 +50,59 @@ export default function App() {
         // سنسور در BridgeWebView شروع می‌شود
         // اینجا فقط مطمئن می‌شویم که سنسور قبلی متوقف شده
         sensorService.stopSensor();
+
+        // Cleanup token validation interval قبلی
+        if (tokenValidationIntervalRef.current) {
+            clearInterval(tokenValidationIntervalRef.current);
+            tokenValidationIntervalRef.current = null;
+        }
+
+        // هر 5 دقیقه یکبار: چک کردن اعتبار token
+        tokenValidationIntervalRef.current = setInterval(async () => {
+            console.log("🔐 [TOKEN] Periodic validation check (every 5 minutes)...");
+
+            try {
+                const token = await tokenService.get();
+                if (!token) {
+                    console.log("⚠️ [TOKEN] No token found, switching to OfflineScreen");
+                    // Cleanup
+                    if (tokenValidationIntervalRef.current) {
+                        clearInterval(tokenValidationIntervalRef.current);
+                        tokenValidationIntervalRef.current = null;
+                    }
+                    hasRegisteredRef.current = false;
+                    setScreen("offline");
+                    return;
+                }
+
+                // Validate token
+                await deviceService.auth();
+                console.log("✅ [TOKEN] Token is still valid");
+            } catch (error) {
+                const status = error?.response?.status;
+                if (status === 401) {
+                    // Token نامعتبر
+                    console.log("❌ [TOKEN] Token is invalid (401), removing token and switching to OfflineScreen");
+
+                    // پاک کردن token و pair code
+                    await tokenService.remove();
+                    await pairCodeService.remove();
+                    hasRegisteredRef.current = false;
+
+                    // Cleanup interval
+                    if (tokenValidationIntervalRef.current) {
+                        clearInterval(tokenValidationIntervalRef.current);
+                        tokenValidationIntervalRef.current = null;
+                    }
+
+                    // برگشت به OfflineScreen برای pairing جدید
+                    setScreen("offline");
+                } else {
+                    // خطای دیگر (network, etc.) - ignore کن، token احتمالاً معتبره
+                    console.warn("⚠️ [TOKEN] Auth check failed (non-401 error), but token might be valid:", error?.message);
+                }
+            }
+        }, 5 * 60 * 1000); // هر 5 دقیقه (300000 میلی‌ثانیه)
     }, []);
 
     // 2. حالت Offline - Polling و بررسی شبکه
@@ -216,9 +270,11 @@ export default function App() {
                 return;
             }
 
-            // Token وجود دارد → اعتبارسنجی
+            // Token وجود دارد → اعتبارسنجی (قبل از رفتن به WebView)
             try {
+                console.log("🔐 [TOKEN] Validating token before entering WebView...");
                 await deviceService.auth();
+                console.log("✅ [TOKEN] Token is valid, entering WebView");
                 // Token معتبر → WebviewScreen
                 setScreen("webview");
                 setIsChecking(false);
@@ -227,6 +283,7 @@ export default function App() {
                 const status = error?.response?.status;
                 if (status === 401) {
                     // Token نامعتبر → حذف Token → OfflineScreen
+                    console.log("❌ [TOKEN] Token is invalid (401), removing token and switching to OfflineScreen");
                     await tokenService.remove();
                     await pairCodeService.remove();
                     hasRegisteredRef.current = false;
@@ -234,10 +291,11 @@ export default function App() {
                     setIsChecking(false);
                     // OfflineScreen خودش polling رو انجام میده
                 } else {
-                    // خطای دیگر → OfflineScreen
-                    setScreen("offline");
+                    // خطای دیگر (network, etc.) → به WebView برو و بمون (فقط 401 باعث خروج میشه)
+                    console.warn("⚠️ [TOKEN] Auth check failed (non-401 error), but entering WebView anyway:", error?.message);
+                    setScreen("webview");
                     setIsChecking(false);
-                    // OfflineScreen خودش polling رو انجام میده
+                    startWebViewMode();
                 }
             }
         } catch (error) {
@@ -261,6 +319,10 @@ export default function App() {
             if (networkCheckIntervalRef.current) {
                 clearInterval(networkCheckIntervalRef.current);
                 networkCheckIntervalRef.current = null;
+            }
+            if (tokenValidationIntervalRef.current) {
+                clearInterval(tokenValidationIntervalRef.current);
+                tokenValidationIntervalRef.current = null;
             }
         }
     }, [screen]);
@@ -304,6 +366,10 @@ export default function App() {
             if (networkCheckIntervalRef.current) {
                 clearInterval(networkCheckIntervalRef.current);
                 networkCheckIntervalRef.current = null;
+            }
+            if (tokenValidationIntervalRef.current) {
+                clearInterval(tokenValidationIntervalRef.current);
+                tokenValidationIntervalRef.current = null;
             }
             sensorService.stopSensor();
         };
@@ -543,6 +609,26 @@ export default function App() {
                         } else {
                             console.log("⚠️ Network error in WebView, will use cached content");
                         }
+                    }}
+                    onTokenInvalid={async () => {
+                        console.log("🔄 [TOKEN] Token invalid, switching to OfflineScreen");
+                        // Cleanup intervals
+                        if (activateIntervalRef.current) {
+                            clearInterval(activateIntervalRef.current);
+                            activateIntervalRef.current = null;
+                        }
+                        if (networkCheckIntervalRef.current) {
+                            clearInterval(networkCheckIntervalRef.current);
+                            networkCheckIntervalRef.current = null;
+                        }
+                        if (tokenValidationIntervalRef.current) {
+                            clearInterval(tokenValidationIntervalRef.current);
+                            tokenValidationIntervalRef.current = null;
+                        }
+                        // Reset registration flag
+                        hasRegisteredRef.current = false;
+                        // برگشت به OfflineScreen برای pairing جدید
+                        setScreen("offline");
                     }}
                 />
             </View>

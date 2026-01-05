@@ -3,25 +3,44 @@ import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { Platform } from "react-native";
 import { sensorService, SensorData } from "@/src/services/sensorService";
 import { tokenService } from "@/src/services/tokenService";
+import { deviceService } from "@/src/services/device.service";
+import { pairCodeService } from "@/src/services/pairCodeService";
 
 interface BridgeWebViewProps {
     webViewUrl: string;
     onError?: (error: Error) => void;
+    onTokenInvalid?: () => void; // Callback برای وقتی token نامعتبره
 }
 
-export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
+export function BridgeWebView({ webViewUrl, onError, onTokenInvalid }: BridgeWebViewProps) {
     const webViewRef = useRef<WebView>(null);
     const isWebViewReady = useRef(false);
     const lastRefreshDateRef = useRef<string | null>(null);
     const refreshCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const isTokenValidatingRef = useRef(false); // برای جلوگیری از validate کردن همزمان
 
-    // Send token to WebView when it's ready
-    const sendTokenToWebView = async () => {
+    // Validate token before sending to WebView
+    const validateAndSendToken = async () => {
         if (!webViewRef.current || !isWebViewReady.current) return;
+        if (isTokenValidatingRef.current) return; // اگر در حال validate هست، صبر کن
 
         try {
+            isTokenValidatingRef.current = true;
             const token = await tokenService.get();
-            if (token) {
+            
+            if (!token) {
+                console.log("⚠️ No token found, cannot send to WebView");
+                isTokenValidatingRef.current = false;
+                return;
+            }
+
+            // اول validate کن که token معتبر هست
+            console.log("🔐 [TOKEN] Validating token before sending to WebView...");
+            try {
+                await deviceService.auth();
+                console.log("✅ [TOKEN] Token is valid, sending to WebView");
+                
+                // Token معتبر → ارسال به WebView
                 const message = JSON.stringify({
                     type: "device_token",
                     token: token,
@@ -37,11 +56,52 @@ export function BridgeWebView({ webViewUrl, onError }: BridgeWebViewProps) {
                     true;
                 `);
                 console.log("✅ Token sent to WebView");
+            } catch (error) {
+                // Token نامعتبر
+                const status = error?.response?.status;
+                if (status === 401) {
+                    // فقط در صورت 401 از WebView بیرون بیا
+                    console.log("❌ [TOKEN] Token is invalid (401), removing token and pair code");
+                    
+                    // پاک کردن token و pair code
+                    await tokenService.remove();
+                    await pairCodeService.remove();
+                    
+                    // اطلاع دادن به App.js که token نامعتبره
+                    if (onTokenInvalid) {
+                        onTokenInvalid();
+                    }
+                } else {
+                    // خطای دیگر (network, etc.) - WebView بمونه و token رو ارسال کن
+                    console.warn("⚠️ [TOKEN] Auth check failed (non-401 error), staying in WebView:", error?.message);
+                    
+                    // در صورت خطای network یا خطای دیگر، token رو ارسال کن و در WebView بمون
+                    const message = JSON.stringify({
+                        type: "device_token",
+                        token: token,
+                    });
+
+                    webViewRef.current.injectJavaScript(`
+                        (function() {
+                            window.postMessage(${message}, '*');
+                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                                window.ReactNativeWebView.postMessage(${message});
+                            }
+                        })();
+                        true;
+                    `);
+                    console.log("✅ Token sent to WebView (staying in WebView despite auth error)");
+                }
             }
         } catch (error) {
-            console.error("Error sending token to WebView:", error);
+            console.error("Error validating/sending token to WebView:", error);
+        } finally {
+            isTokenValidatingRef.current = false;
         }
     };
+
+    // Send token to WebView when it's ready (legacy function name for compatibility)
+    const sendTokenToWebView = validateAndSendToken;
 
     useEffect(() => {
         // Start sensor when WebView mounts
