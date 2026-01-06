@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Include SecureStore data in backup -->
+    <include domain="sharedpref" path="ExpoSecureStore"/>
+    <include domain="file" path="ExpoSecureStore"/>
+</full-backup-content>
+
