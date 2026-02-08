@@ -46,6 +46,8 @@ export const useDeviceInfo = () => {
         },
         enabled: hasToken && cacheLoaded,
         staleTime: 10 * 1000, // 10 seconds
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         retry: 3,
         retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
         // فقط برای اولین render از cache استفاده کن
@@ -96,6 +98,8 @@ export const useRandomSnippet = (): { data: any; isLoading: boolean } => {
         },
         enabled: hasToken,
         staleTime: 10 * 1000, // 10 seconds
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         retry: 1,
         // هر 5 دقیقه refetch کن برای snippet جدید
         refetchInterval: 5 * 60 * 1000,

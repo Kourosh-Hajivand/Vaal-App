@@ -221,6 +221,8 @@ export const useDeviceWeather = () => {
         enabled: hasToken,
         retry: 5,
         staleTime: 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         refetchInterval: (query) => {
             if (!hasToken) {
                 return false;
@@ -253,6 +255,8 @@ export const useDeviceInfo = (enabled: boolean = true) => {
             return failureCount < 5;
         },
         staleTime: 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         placeholderData: (previousData) => previousData,
         throwOnError: false,
         refetchInterval: (query) => {
@@ -303,6 +307,8 @@ export const useDeviceEmergency = () => {
         enabled: hasToken,
         retry: 5,
         staleTime: 5 * 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         refetchInterval: (query) => {
             if (!hasToken) {
                 return false;
@@ -335,6 +341,8 @@ export const useRandomSnippet = (enabled: boolean = true) => {
             return failureCount < 3;
         },
         staleTime: 0,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         refetchInterval: (query) => {
             if (!hasToken) {
                 return false;
@@ -361,6 +369,8 @@ export const useDeviceCategories = () => {
         enabled: hasToken,
         retry: 3,
         staleTime: 5 * 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         refetchInterval: () => {
             if (!hasToken) {
                 return false;
@@ -390,6 +400,8 @@ export const useDeviceContacts = (enabled: boolean = true) => {
             return failureCount < 3;
         },
         staleTime: 2 * 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         refetchInterval: (query) => {
             if (!hasToken) {
                 return false;

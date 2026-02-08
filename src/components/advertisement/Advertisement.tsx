@@ -356,18 +356,18 @@ export const Advertisement: React.FC = () => {
             {currentItem.type === "video" ? <VideoPlayer uri={localPath} duration={currentItem.duration} onEnded={advanceToNext} isPaused={isPaused} onProgress={handleVideoProgress} /> : <ImageDisplay uri={localPath} />}
 
             {/* Debug Overlay */}
-            {__DEV__ && (
+            {/* {__DEV__ && (
                 <View style={styles.debugOverlay}>
                     <Text style={styles.debugText}>
                         📹 {currentItem.title} ({currentIndex + 1}/{readyItems.length})
                     </Text>
                     <Text style={styles.debugText}>⏱️ Duration: {currentItem.duration}s</Text>
-                    {/* Countdown Timer */}
+
                     <Text style={[styles.debugText, styles.timerText]}>⏳ Remaining: {remainingTime.toFixed(1)}s</Text>
                     {currentItem.type === "video" && <Text style={styles.debugText}>📼 Video: {videoProgress.toFixed(1)}s</Text>}
                     <Text style={styles.debugText}>{isPaused ? "⏸️ PAUSED" : "▶️ PLAYING"}</Text>
                     <View style={styles.separator} />
-                    {/* Internet Status */}
+
                     <Text style={[styles.debugText, isOnline ? styles.onlineText : styles.offlineText]}>
                         {isOnline ? "🟢 Online" : "🔴 Offline"} ({connectionType})
                     </Text>
@@ -387,7 +387,7 @@ export const Advertisement: React.FC = () => {
                     </Text>
                     {(playlist?.items?.length || 0) > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
                 </View>
-            )}
+            )} */}
         </View>
     );
 };
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#000",
         borderRadius: 14,
-        overflow: 'hidden',
+        overflow: "hidden",
     },
     loadingContainer: {
         flex: 1,
@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "#1a1a1a",
         borderRadius: 14,
-        overflow: 'hidden',
+        overflow: "hidden",
     },
     loadingContent: {
         alignItems: "center",
@@ -451,7 +451,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "#000",
         borderRadius: 14,
-        overflow: 'hidden',
+        overflow: "hidden",
     },
     emptyText: {
         color: "#fff",

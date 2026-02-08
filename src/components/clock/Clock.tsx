@@ -32,7 +32,7 @@ const formatTimeWithoutSeconds = (date: Date): string => {
 export const Clock: React.FC = () => {
     const [time, setTime] = useState<Date>(getIranTime());
     const [imageError, setImageError] = useState(false);
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
 
     const { data: device, isLoading } = useDeviceInfo();
     const { data: randomSnippet, isLoading: isLoadingSnippet } = useRandomSnippet();
@@ -90,10 +90,10 @@ export const Clock: React.FC = () => {
             <View style={styles.contentContainer}>
                 {/* Header: Building info */}
                 <View style={styles.header}>
-                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={styles.headerText}>
+                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: "white" }}>
                         {device?.building?.manager_name ? `مدیریت ${device.building.manager_name}` : ""}
                     </CustomText>
-                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={styles.headerText}>
+                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: "white" }}>
                         {device?.building?.name ? `ساختمان ${device.building.name}` : ""}
                     </CustomText>
                 </View>
@@ -106,7 +106,7 @@ export const Clock: React.FC = () => {
                     </CustomText>
 
                     {/* Date & Weather */}
-                    <View style={[styles.dateWeather, { backgroundColor: "#F8F8F8" }]}>
+                    <View style={[styles.dateWeather, { backgroundColor: isDark ? "rgba(0, 0, 0, 0.20);" : "#F8F8F8" }]}>
                         <Weather />
                         <View style={styles.dateContainer}>
                             <View style={styles.dateRow}>
@@ -197,9 +197,7 @@ const styles = StyleSheet.create({
         width: "100%",
         zIndex: 10,
     },
-    headerText: {
-        opacity: 0.5,
-    },
+
     mainContent: {
         flex: 1,
         alignItems: "center",

@@ -2,7 +2,10 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { StyleSheet, View, ActivityIndicator, StatusBar } from "react-native";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
@@ -19,8 +22,16 @@ const queryClient = new QueryClient({
         queries: {
             retry: 2,
             staleTime: 1 * 60 * 1000, // 1 minute
+            gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز — کش رو نگه دار برای آفلاین
         },
     },
+});
+
+// AsyncStorage Persister — تمام query data رو به AsyncStorage ذخیره می‌کنه
+const asyncStoragePersister = createAsyncStoragePersister({
+    storage: AsyncStorage,
+    key: "REACT_QUERY_OFFLINE_CACHE",
+    throttleTime: 2000, // هر 2 ثانیه persist (برای performance)
 });
 
 export default function App() {
@@ -224,22 +235,22 @@ export default function App() {
     // Render: Offline Screen
     if (screen === "offline") {
         return (
-            <QueryClientProvider client={queryClient}>
+            <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
                     <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
                 </ThemeProvider>
-            </QueryClientProvider>
+            </PersistQueryClientProvider>
         );
     }
 
     // Render: Home Screen
     if (screen === "home") {
         return (
-            <QueryClientProvider client={queryClient}>
+            <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
                     <HomeScreen onLogout={handleLogout} />
                 </ThemeProvider>
-            </QueryClientProvider>
+            </PersistQueryClientProvider>
         );
     }
 

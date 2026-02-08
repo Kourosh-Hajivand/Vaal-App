@@ -70,6 +70,8 @@ export const useDeviceContacts = () => {
         },
         enabled: hasToken && cacheLoaded,
         staleTime: 60 * 1000, // 1 minute
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         retry: 3,
         retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
         // فقط برای اولین render از cache استفاده کن

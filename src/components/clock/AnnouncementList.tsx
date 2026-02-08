@@ -12,20 +12,21 @@ import { getIranTime, formatRelativeTime, formatPersianDateShort } from "@/src/u
 import { useOnlineStatus } from "@/src/hooks/use-online-status";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import Svg, { Path, Defs, LinearGradient, Stop, Circle } from "react-native-svg";
+import { BlurView } from "expo-blur";
 
 // ─── Type Config ─────────────────
-const TYPE_CONFIG: Record<string, { bg: string; color: string; icon: string }> = {
-    success: { bg: "#DCFFDC", color: "#00D900", icon: "success" },
-    info: { bg: "#FFF8DC", color: "#ECBD00", icon: "info" },
-    warning: { bg: "#FFE8DC", color: "#FD5C02", icon: "warning" },
-    urgent: { bg: "#FFE1E1", color: "#FF3B30", icon: "urgent" },
-    emergency: { bg: "#FFE1E1", color: "#FF3B30", icon: "urgent" },
-    maintenance: { bg: "#FFF8DC", color: "#ECBD00", icon: "info" },
-};
+const getTypeConfig = (isDark: boolean): Record<string, { bg: string; color: string; icon: string }> => ({
+    success: { bg: isDark ? "#0E3B0F" : "#DCFFDC", color: "#00D900", icon: "success" },
+    info: { bg: isDark ? "#3E3616" : "#FFF8DC", color: "#ECBD00", icon: "info" },
+    warning: { bg: isDark ? "#513A2E" : "#FFE8DC", color: "#FD5C02", icon: "warning" },
+    urgent: { bg: isDark ? "#3B0E0E" : "#FFE1E1", color: "#FF3B30", icon: "urgent" },
+    emergency: { bg: isDark ? "#3B0E0E" : "#FFE1E1", color: "#FF3B30", icon: "urgent" },
+    maintenance: { bg: isDark ? "#3E3616" : "#FFF8DC", color: "#ECBD00", icon: "info" },
+});
 
 // ─── Icons ───────────────────────
 const SuccessIcon = ({ c }: { c: string }) => (
-    <Svg width={10} height={10} viewBox="0 0 10 10" fill="none">
+    <Svg width={14} height={14} viewBox="0 0 10 10" fill="none">
         <Path
             d="M3.5 5.375L4.625 6.5L6.5 3.875M9.5 5C9.5 5.59095 9.3836 6.17611 9.15746 6.72208C8.93131 7.26804 8.59984 7.76412 8.18198 8.18198C7.76412 8.59984 7.26804 8.93131 6.72208 9.15746C6.17611 9.3836 5.59095 9.5 5 9.5C4.40905 9.5 3.82389 9.3836 3.27792 9.15746C2.73196 8.93131 2.23588 8.59984 1.81802 8.18198C1.40016 7.76412 1.06869 7.26804 0.842542 6.72208C0.616396 6.17611 0.5 5.59095 0.5 5C0.5 3.80653 0.974106 2.66193 1.81802 1.81802C2.66193 0.974106 3.80653 0.5 5 0.5C6.19347 0.5 7.33807 0.974106 8.18198 1.81802C9.02589 2.66193 9.5 3.80653 9.5 5Z"
             stroke={c}
@@ -58,14 +59,15 @@ const WarningIcon = ({ c }: { c: string }) => (
     </Svg>
 );
 const UrgentIcon = ({ c }: { c: string }) => (
-    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+    <Svg width={16} height={16} viewBox="0 0 14 14" fill="none">
         <Circle cx="7" cy="7" r="6" stroke={c} strokeWidth="1.2" />
         <Path d="M7 4V7.5M7 10H7.01" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
 );
 
-const AIcon = ({ type }: { type: string }) => {
-    const t = TYPE_CONFIG[type] || TYPE_CONFIG.info;
+const AIcon = ({ type, isDark }: { type: string; isDark: boolean }) => {
+    const cfg = getTypeConfig(isDark);
+    const t = cfg[type] || cfg.info;
     switch (t.icon) {
         case "success":
             return <SuccessIcon c={t.color} />;
@@ -105,7 +107,7 @@ const SLOT_STYLE = [
 export const AnnouncementList: React.FC = () => {
     const { data: announcements, dataUpdatedAt, isFetching, isRefetching } = useDeviceAnnouncements();
     const { isOnline } = useOnlineStatus();
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
     const [items, setItems] = useState<any[]>([]);
     const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
     const lastFetchTimeRef = useRef<number | null>(null);
@@ -242,10 +244,11 @@ interface StackItemProps {
 }
 
 const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
-    const cfg = TYPE_CONFIG[data.type] || TYPE_CONFIG.info;
+    const { isDark } = useTheme();
+    const typeConfig = getTypeConfig(isDark);
+    const cfg = typeConfig[data.type] || typeConfig.info;
     const isStacked = slot >= 3;
     const target = SLOT_STYLE[slot] || SLOT_STYLE[4];
-
     // Animated scale + opacity
     const scale = useSharedValue(target.scale);
     const itemOpacity = useSharedValue(target.opacity);
@@ -265,15 +268,14 @@ const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
 
     return (
         // Outer: Layout transition + entering/exiting
-        <Animated.View
-            style={[slotMargin, { zIndex: 10 - slot }]}
-            layout={Layout.duration(DUR).easing(EASE)}
-            exiting={ExitAnimation}
-            entering={FadeIn.duration(DUR)}
-        >
+        <Animated.View style={[slotMargin, { zIndex: 10 - slot }]} layout={Layout.duration(DUR).easing(EASE)} exiting={ExitAnimation} entering={FadeIn.duration(DUR)}>
             {/* Inner: scale + opacity animation */}
             <Animated.View style={innerStyle}>
-                <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                <BlurView
+                    intensity={isDark ? 40 : 60}
+                    tint={isDark ? "dark" : "light"}
+                    style={[styles.card, { borderColor: isDark ? "#394753" : colors.border, backgroundColor: isDark ? "rgba(34,50,64,0.55)" : "rgba(255,255,255,0.7)", overflow: "hidden" }]}
+                >
                     <View style={styles.row}>
                         <View style={styles.textArea}>
                             <View style={styles.titleRow}>
@@ -291,10 +293,10 @@ const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
                             )}
                         </View>
                         <View style={[styles.iconCircle, { backgroundColor: cfg.bg }]}>
-                            <AIcon type={data.type} />
+                            <AIcon type={data.type} isDark={isDark} />
                         </View>
                     </View>
-                </View>
+                </BlurView>
             </Animated.View>
         </Animated.View>
     );
