@@ -1,35 +1,43 @@
 {
     "expo": {
-        "name": "Vall",
-        "slug": "Vall",
+        "name": "Vaal",
+        "slug": "Vaal",
         "version": "1.0.0",
-        "orientation": "portrait",
-        "icon": "./assets/images/icon.png",
-        "scheme": "sensormonitor",
+        "orientation": "landscape",
+        "icon": "./assets/Logo.png",
+        "scheme": "vaal",
         "userInterfaceStyle": "automatic",
         "newArchEnabled": true,
+        "splash": {
+            "image": "./assets/Logo.png",
+            "resizeMode": "contain",
+            "backgroundColor": "#FF6F3C"
+        },
         "ios": {
             "supportsTablet": true,
             "bundleIdentifier": "com.anonymous.SensorMonitor"
         },
         "android": {
             "adaptiveIcon": {
-                "backgroundColor": "#E6F4FE",
-                "foregroundImage": "./assets/images/android-icon-foreground.png",
-                "backgroundImage": "./assets/images/android-icon-background.png",
-                "monochromeImage": "./assets/images/android-icon-monochrome.png"
+                "backgroundColor": "#FF6F3C",
+                "foregroundImage": "./assets/Logo.png"
             },
             "edgeToEdgeEnabled": true,
             "predictiveBackGestureEnabled": false,
             "package": "com.anonymous.SensorMonitor",
             "navigationBar": {
-                "visible": "immersive"
+                "visible": "immersive",
+                "behavior": "overlay-swipe"
             },
-            "softwareKeyboardLayoutMode": "pan"
+            "softwareKeyboardLayoutMode": "pan",
+            "userInterfaceStyle": "dark",
+            "statusBar": {
+                "hidden": true
+            }
         },
         "web": {
             "output": "static",
-            "favicon": "./assets/images/favicon.png"
+            "favicon": "./assets/Logo.png"
         },
         "plugins": [
             "expo-router",
@@ -37,13 +45,9 @@
             [
                 "expo-splash-screen",
                 {
-                    "image": "./assets/images/splash-icon.png",
-                    "imageWidth": 200,
+                    "image": "./assets/Logo.png",
                     "resizeMode": "contain",
-                    "backgroundColor": "#ffffff",
-                    "dark": {
-                        "backgroundColor": "#000000"
-                    }
+                    "backgroundColor": "#FF6F3C"
                 }
             ]
         ],

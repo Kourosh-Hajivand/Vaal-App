@@ -1,4 +1,4 @@
-import RadarLogic from "../../RadarLogic";
+import RadarLogic from "../../RadarLogic.js";
 
 const SERIAL_PORT = "/dev/ttyS1";
 const BAUD_RATE = 115200;

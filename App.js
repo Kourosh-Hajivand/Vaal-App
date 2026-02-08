@@ -1,19 +1,26 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { StyleSheet, View, ActivityIndicator, SafeAreaView, StatusBar, Platform } from "react-native";
+import { StyleSheet, View, ActivityIndicator, StatusBar } from "react-native";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
 import OfflineScreen from "./components/OfflineScreen";
-import { BridgeWebView } from "./src/components/BridgeWebView";
-import { sensorService } from "./src/services/sensorService";
+import HomeScreen from "./components/HomeScreen";
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
-const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "https://vaal.pixlink.co";
-// const WEBVIEW_URL = process.env.EXPO_PUBLIC_WEBVIEW_URL || "http://192.168.1.119:3000";
+// Create QueryClient instance
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            retry: 2,
+            staleTime: 1 * 60 * 1000, // 1 minute
+        },
+    },
+});
 
 export default function App() {
     // Load custom fonts
@@ -26,11 +33,7 @@ export default function App() {
 
     const [screen, setScreen] = useState("loading");
     const [isChecking, setIsChecking] = useState(true);
-    const activateIntervalRef = useRef(null);
-    const networkCheckIntervalRef = useRef(null);
     const networkUnsubscribeRef = useRef(null);
-    const tokenValidationIntervalRef = useRef(null); // برای چک کردن token هر 10 دقیقه
-    const hasRegisteredRef = useRef(false);
     const screenRef = useRef("loading");
 
     // Hide splash screen when fonts are loaded
@@ -45,593 +48,193 @@ export default function App() {
         screenRef.current = screen;
     }, [screen]);
 
-    // 3. حالت WebView - نمایش WebView و شروع سنسور
-    const startWebViewMode = useCallback(() => {
-        // سنسور در BridgeWebView شروع می‌شود
-        // اینجا فقط مطمئن می‌شویم که سنسور قبلی متوقف شده
-        sensorService.stopSensor();
-
-        // Cleanup token validation interval قبلی
-        if (tokenValidationIntervalRef.current) {
-            clearInterval(tokenValidationIntervalRef.current);
-            tokenValidationIntervalRef.current = null;
-        }
-
-        // هر 5 دقیقه یکبار: چک کردن اعتبار token
-        tokenValidationIntervalRef.current = setInterval(async () => {
-            console.log("🔐 [TOKEN] Periodic validation check (every 5 minutes)...");
-
-            try {
-                const token = await tokenService.get();
-                if (!token) {
-                    console.log("⚠️ [TOKEN] No token found, switching to OfflineScreen");
-                    // Cleanup
-                    if (tokenValidationIntervalRef.current) {
-                        clearInterval(tokenValidationIntervalRef.current);
-                        tokenValidationIntervalRef.current = null;
-                    }
-                    hasRegisteredRef.current = false;
-                    setScreen("offline");
-                    return;
-                }
-
-                // Validate token
-                await deviceService.auth();
-                console.log("✅ [TOKEN] Token is still valid");
-            } catch (error) {
-                const status = error?.response?.status;
-                if (status === 401) {
-                    // Token نامعتبر
-                    console.log("❌ [TOKEN] Token is invalid (401), removing token and switching to OfflineScreen");
-
-                    // پاک کردن token و pair code
-                    await tokenService.remove();
-                    await pairCodeService.remove();
-                    hasRegisteredRef.current = false;
-
-                    // Cleanup interval
-                    if (tokenValidationIntervalRef.current) {
-                        clearInterval(tokenValidationIntervalRef.current);
-                        tokenValidationIntervalRef.current = null;
-                    }
-
-                    // برگشت به OfflineScreen برای pairing جدید
-                    setScreen("offline");
-                } else {
-                    // خطای دیگر (network, etc.) - ignore کن، token احتمالاً معتبره
-                    console.warn("⚠️ [TOKEN] Auth check failed (non-401 error), but token might be valid:", error?.message);
-                }
-            }
-        }, 5 * 60 * 1000); // هر 5 دقیقه (300000 میلی‌ثانیه)
-    }, []);
-
-    // 2. حالت Offline - Polling و بررسی شبکه
-    const startOfflineMode = useCallback(() => {
-        // Cleanup intervals قبلی برای جلوگیری از memory leak
-        if (activateIntervalRef.current) {
-            clearInterval(activateIntervalRef.current);
-            activateIntervalRef.current = null;
-        }
-        if (networkCheckIntervalRef.current) {
-            clearInterval(networkCheckIntervalRef.current);
-            networkCheckIntervalRef.current = null;
-        }
-
-        // بررسی Pair Code موجود
-        checkExistingPairCode();
-
-        // هر 3 ثانیه یکبار: تلاش برای فعال‌سازی
-
-        activateIntervalRef.current = setInterval(async () => {
-            // بررسی Token قبل از هر تلاش
-            const existingToken = await tokenService.get();
-            if (existingToken) {
-                console.log("🔑 [TOKEN] Token found in storage:", existingToken);
-                // Token دریافت شد → توقف Polling
-                if (activateIntervalRef.current) {
-                    clearInterval(activateIntervalRef.current);
-                    activateIntervalRef.current = null;
-                }
-                // بررسی اعتبار Token
-                try {
-                    await deviceService.auth();
-                    setScreen("webview");
-                    startWebViewMode();
-                } catch (error) {
-                    if (error?.response?.status === 401) {
-                        await tokenService.remove();
-                        await pairCodeService.remove();
-                        hasRegisteredRef.current = false;
-                    }
-                }
-                return;
-            }
-
-            // دریافت Pair Code
-            const pairCode = await pairCodeService.get();
-            if (!pairCode) {
-                // اگر Pair Code نداریم، ثبت دستگاه
-                if (!hasRegisteredRef.current) {
-                    registerDevice();
-                }
-                return;
-            }
-
-            // تلاش برای فعال‌سازی
-            try {
-                const response = await deviceService.activate({
-                    pair_code: pairCode,
-                });
-
-                // Response structure from deviceService.activate():
-                // {
-                //   data: {
-                //     id: "...",
-                //     token: "47|cgkB1ABjYolnfQi3uPksX3e0jIhSYJBtEAW2Ic15afdc727e",
-                //     status: "active",
-                //     building: { ... },
-                //     ...
-                //   },
-                //   status: "success",
-                //   message: "Device activated successfully"
-                // }
-                // Token is at: response.data.token
-                const token = response.data.token;
-                console.log("🔑 [TOKEN] Token received from activate:", token);
-                if (token) {
-                    // Token دریافت شد
-                    console.log("💾 [TOKEN] Saving token to storage:", token);
-                    await tokenService.save(token);
-                    await pairCodeService.remove();
-
-                    // توقف Polling
-                    if (activateIntervalRef.current) {
-                        clearInterval(activateIntervalRef.current);
-                        activateIntervalRef.current = null;
-                    }
-
-                    // هدایت به WebviewScreen
-                    setScreen("webview");
-                    startWebViewMode();
-                }
-            } catch (error) {
-                const status = error?.response?.status;
-                if (status === 404) {
-                    // خطای Pair Code
-                    console.log("Invalid pair code");
-                    await pairCodeService.remove();
-                    hasRegisteredRef.current = false;
-                } else if (status === 400) {
-                    // دستگاه هنوز pending است → ادامه Polling
-                    // (بدون لاگ برای جلوگیری از spam)
-                } else {
-                    console.error("Error activating device:", error.message);
-                }
-            }
-        }, 5000); // هر 5 ثانیه
-
-        // هر 10 ثانیه: بررسی اتصال اینترنت
-        if (networkCheckIntervalRef.current) {
-            clearInterval(networkCheckIntervalRef.current);
-        }
-
-        networkCheckIntervalRef.current = setInterval(async () => {
-            const isConnected = await networkService.isConnected();
-            if (isConnected) {
-                // آنلاین شد → بررسی Token و اعتبارسنجی
-                const token = await tokenService.get();
-                console.log("🔑 [TOKEN] Token from storage:", token || "NO TOKEN");
-                if (token) {
-                    try {
-                        await deviceService.auth();
-                        // Token معتبر → هدایت به WebviewScreen
-                        if (activateIntervalRef.current) {
-                            clearInterval(activateIntervalRef.current);
-                            activateIntervalRef.current = null;
-                        }
-                        setScreen("webview");
-                        startWebViewMode();
-                    } catch (error) {
-                        if (error?.response?.status === 401) {
-                            await tokenService.remove();
-                            await pairCodeService.remove();
-                            hasRegisteredRef.current = false;
-                        }
-                    }
-                }
-            }
-        }, 5000); // هر 5 ثانیه
-    }, [startWebViewMode]);
-
+    // بررسی اولیه وضعیت (token → network)
     const checkInitialStatus = useCallback(async () => {
         setIsChecking(true);
 
         try {
-            // بررسی اتصال اینترنت
-            const isConnected = await networkService.isConnected();
-
-            if (!isConnected) {
-                // Offline → هدایت به OfflineScreen
-                // OfflineScreen خودش polling رو انجام میده، نیازی به startOfflineMode نیست
-                setScreen("offline");
-                setIsChecking(false);
-                return;
-            }
-
-            // Online → بررسی Token
+            // ✅ اول Token رو چک کن (مهم‌ترین)
             const token = await tokenService.get();
             console.log("🔑 [TOKEN] Token from storage:", token || "NO TOKEN");
 
             if (!token) {
-                // بدون Token → OfflineScreen
-                // OfflineScreen خودش polling رو انجام میده، نیازی به startOfflineMode نیست
+                // ❌ بدون Token → OfflineScreen (برای registration)
+                console.log("❌ [TOKEN] No token found, going to OfflineScreen");
                 setScreen("offline");
                 setIsChecking(false);
                 return;
             }
 
-            // Token وجود دارد → اعتبارسنجی (قبل از رفتن به WebView)
-            try {
-                console.log("🔐 [TOKEN] Validating token before entering WebView...");
-                await deviceService.auth();
-                console.log("✅ [TOKEN] Token is valid, entering WebView");
-                // Token معتبر → WebviewScreen
-                setScreen("webview");
+            // ✅ Token داریم → چک کن online هستیم یا نه
+            const isConnected = await networkService.isConnected();
+            console.log("🌐 [NETWORK]", isConnected ? "Online" : "Offline");
+
+            if (!isConnected) {
+                // 📦 Token داریم + Offline → مستقیم Home برو (از cache استفاده کن)
+                console.log("📦 [OFFLINE] Has token, entering Home with cached data");
+                setScreen("home");
                 setIsChecking(false);
-                startWebViewMode();
+                return;
+            }
+
+            // ✅ Token داریم + Online → اعتبارسنجی
+            try {
+                console.log("🔐 [TOKEN] Validating token...");
+                await deviceService.auth();
+                console.log("✅ [TOKEN] Token is valid, entering Home");
+                setScreen("home");
+                setIsChecking(false);
             } catch (error) {
                 const status = error?.response?.status;
                 if (status === 401) {
                     // Token نامعتبر → حذف Token → OfflineScreen
-                    console.log("❌ [TOKEN] Token is invalid (401), removing token and switching to OfflineScreen");
+                    console.log("❌ [TOKEN] Token invalid (401), removing and going to OfflineScreen");
                     await tokenService.remove();
                     await pairCodeService.remove();
-                    hasRegisteredRef.current = false;
                     setScreen("offline");
                     setIsChecking(false);
-                    // OfflineScreen خودش polling رو انجام میده
                 } else {
-                    // خطای دیگر (network, etc.) → به WebView برو و بمون (فقط 401 باعث خروج میشه)
-                    console.warn("⚠️ [TOKEN] Auth check failed (non-401 error), but entering WebView anyway:", error?.message);
-                    setScreen("webview");
+                    // خطای network یا server → به Home برو با cached data
+                    console.warn("⚠️ [TOKEN] Validation failed (non-401), entering Home with cache:", error?.message);
+                    setScreen("home");
                     setIsChecking(false);
-                    startWebViewMode();
                 }
             }
         } catch (error) {
-            console.error("Error in checkInitialStatus:", error);
-            setScreen("offline");
+            console.error("❌ [APP] Error in checkInitialStatus:", error);
+            // اگر token داریم، به Home برو
+            const token = await tokenService.get();
+            setScreen(token ? "home" : "offline");
             setIsChecking(false);
-            // OfflineScreen خودش polling رو انجام میده
         }
-    }, [startWebViewMode]);
+    }, []);
 
-    // Cleanup intervals وقتی screen به "offline" تغییر میکنه
-    // چون OfflineScreen خودش polling رو انجام میده، App.js نباید polling کنه
+    // بررسی اولیه هنگام باز شدن اپ
     useEffect(() => {
-        if (screen === "offline") {
-            // وقتی به OfflineScreen می‌ریم، intervals App.js رو cleanup کن
-            // چون OfflineScreen خودش polling رو انجام میده
-            if (activateIntervalRef.current) {
-                clearInterval(activateIntervalRef.current);
-                activateIntervalRef.current = null;
-            }
-            if (networkCheckIntervalRef.current) {
-                clearInterval(networkCheckIntervalRef.current);
-                networkCheckIntervalRef.current = null;
-            }
-            if (tokenValidationIntervalRef.current) {
-                clearInterval(tokenValidationIntervalRef.current);
-                tokenValidationIntervalRef.current = null;
-            }
-        }
-    }, [screen]);
-
-    // TEMPORARY: Auto-clear token on mount for testing (must run before checkInitialStatus)
-    // useEffect(() => {
-    //     const clearTokenOnMount = async () => {
-    //         try {
-    //             const existingToken = await tokenService.get();
-    //             if (existingToken) {
-    //                 console.log("🗑️ [DEBUG] Token found on mount, auto-clearing for testing...");
-    //                 await tokenService.remove();
-    //                 await pairCodeService.remove();
-    //                 hasRegisteredRef.current = false;
-    //                 console.log("✅ [DEBUG] Token and pair code cleared automatically");
-    //             } else {
-    //                 console.log("ℹ️ [DEBUG] No token found, proceeding normally");
-    //             }
-    //         } catch (error) {
-    //             console.error("❌ [DEBUG] Error in auto-clear:", error);
-    //         }
-    //     };
-
-    //     clearTokenOnMount();
-    // }, []); // فقط یک بار در mount اجرا میشه
-
-    // 1. بررسی اولیه هنگام باز شدن اپ
-    useEffect(() => {
-        // کمی delay بذار تا clearTokenOnMount اجرا بشه
-        const timer = setTimeout(() => {
-            checkInitialStatus();
-        }, 500); // 500ms delay برای اطمینان از اینکه token پاک شده
-
-        return () => {
-            clearTimeout(timer);
-            // Cleanup intervals
-            if (activateIntervalRef.current) {
-                clearInterval(activateIntervalRef.current);
-                activateIntervalRef.current = null;
-            }
-            if (networkCheckIntervalRef.current) {
-                clearInterval(networkCheckIntervalRef.current);
-                networkCheckIntervalRef.current = null;
-            }
-            if (tokenValidationIntervalRef.current) {
-                clearInterval(tokenValidationIntervalRef.current);
-                tokenValidationIntervalRef.current = null;
-            }
-            sensorService.stopSensor();
-        };
+        checkInitialStatus();
     }, [checkInitialStatus]);
 
-    // 2. Subscribe to network changes for instant response
+    // Subscribe to network changes
     useEffect(() => {
         networkUnsubscribeRef.current = networkService.subscribe(async (isConnected) => {
-            console.log("🌐 Network status changed:", isConnected ? "Connected" : "Disconnected");
+            console.log("🌐 [NETWORK] Status changed:", isConnected ? "Connected" : "Disconnected");
 
             if (!isConnected) {
-                // اینترنت قطع شد → اگر در WebView هستیم و token داریم، در WebView بمون و از کش استفاده کن
-                if (screenRef.current === "webview") {
-                    const token = await tokenService.get();
-                    if (token) {
-                        console.log("⚠️ Internet disconnected, but staying in WebView with cached content");
-                        // در WebView بمون و از کش استفاده کن - نیازی به تغییر screen نیست
-                        return;
-                    } else {
-                        // اگر token نداریم، به OfflineScreen برگرد
-                        console.log("⚠️ Internet disconnected, no token, switching to OfflineScreen");
-                        if (activateIntervalRef.current) {
-                            clearInterval(activateIntervalRef.current);
-                            activateIntervalRef.current = null;
-                        }
-                        if (networkCheckIntervalRef.current) {
-                            clearInterval(networkCheckIntervalRef.current);
-                            networkCheckIntervalRef.current = null;
-                        }
-                        setScreen("offline");
-                    }
+                // ❌ اینترنت قطع شد
+                if (screenRef.current === "home") {
+                    // ✅ در Home بمون (Offline Mode با cache)
+                    console.log("📦 [OFFLINE] Internet lost, staying in Home with cached data");
+                    return;
                 }
+                // اگر در OfflineScreen هستیم، همونجا بمون
             } else {
-                // اینترنت وصل شد → بررسی Token
+                // ✅ اینترنت وصل شد
                 if (screenRef.current === "offline") {
-                    console.log("✅ Internet connected, checking token...");
+                    console.log("🌐 [ONLINE] Internet connected, checking token...");
                     const token = await tokenService.get();
                     if (token) {
                         try {
                             await deviceService.auth();
-                            // Token معتبر → هدایت به WebviewScreen
-                            // Cleanup intervals قبل از تغییر screen
-                            if (activateIntervalRef.current) {
-                                clearInterval(activateIntervalRef.current);
-                                activateIntervalRef.current = null;
-                            }
-                            if (networkCheckIntervalRef.current) {
-                                clearInterval(networkCheckIntervalRef.current);
-                                networkCheckIntervalRef.current = null;
-                            }
-                            setScreen("webview");
-                            startWebViewMode();
+                            console.log("✅ [TOKEN] Valid, going to Home");
+                            setScreen("home");
                         } catch (error) {
                             if (error?.response?.status === 401) {
+                                console.log("❌ [TOKEN] Invalid (401), removing token");
                                 await tokenService.remove();
                                 await pairCodeService.remove();
-                                hasRegisteredRef.current = false;
+                                // در OfflineScreen بمون برای registration
+                            } else {
+                                // Network error - به Home برو با cache
+                                console.log("⚠️ [TOKEN] Validation error (non-401), going to Home with cache");
+                                setScreen("home");
                             }
                         }
+                    } else {
+                        // token نداریم، در OfflineScreen بمون برای registration
+                        console.log("❌ [TOKEN] No token, staying in OfflineScreen");
                     }
                 }
             }
         });
 
         return () => {
-            // Cleanup network listener
             if (networkUnsubscribeRef.current) {
                 networkUnsubscribeRef.current();
             }
         };
-    }, [startOfflineMode, startWebViewMode]);
+    }, []);
 
-    const checkExistingPairCode = async () => {
-        try {
-            const existingToken = await tokenService.get();
-            if (existingToken) {
-                return;
-            }
+    // Handler: وقتی در OfflineScreen token دریافت شد
+    const handleConnected = useCallback(async (onLog) => {
+        const log = (msg) => {
+            console.log(msg);
+            if (onLog) onLog(msg);
+        };
 
-            const existingPairCode = await pairCodeService.get();
-            if (existingPairCode) {
-                // Pair Code موجود است، polling شروع می‌شود
-                return;
-            }
+        log("🔔 [HANDLE_CONNECTED] Callback triggered");
 
-            // اگر Pair Code نداریم، ثبت دستگاه
-            if (!hasRegisteredRef.current) {
-                registerDevice();
+        const token = await tokenService.get();
+        log(`🔑 [HANDLE_CONNECTED] Token retrieved: ${token ? token.substring(0, 20) + "..." : "NO TOKEN"}`);
+
+        if (token) {
+            log("✅ [HANDLE_CONNECTED] Token exists, redirecting to Home...");
+            setScreen("home");
+
+            // Background validation
+            try {
+                await deviceService.auth();
+                log("✅ [HANDLE_CONNECTED] Token validated successfully");
+            } catch (error) {
+                log(`❌ [HANDLE_CONNECTED] Auth validation error: ${error?.message || error}`);
+
+                if (error?.response?.status === 401) {
+                    log("❌ [HANDLE_CONNECTED] Token is invalid (401), switching back to offline");
+                    await tokenService.remove();
+                    await pairCodeService.remove();
+                    setScreen("offline");
+                } else {
+                    log(`⚠️ [HANDLE_CONNECTED] Auth check failed (non-401), but staying in Home: ${error?.message}`);
+                }
             }
-        } catch (error) {
-            console.error("Error checking existing pair code:", error);
+        } else {
+            log("❌ [HANDLE_CONNECTED] No token found! Cannot redirect to Home.");
         }
-    };
+    }, []);
 
-    const registerDevice = async () => {
-        if (hasRegisteredRef.current) return;
-
-        try {
-            hasRegisteredRef.current = true;
-
-            const androidId = await getAndroidId();
-            const ipAddress = await networkService.getIpAddress();
-
-            const response = await deviceService.register({
-                serial: androidId,
-                app_version: "1.0.0",
-                ip_address: ipAddress || null,
-            });
-
-            const pairCode = response.data?.pair_code;
-            if (pairCode) {
-                await pairCodeService.save(pairCode);
-                console.log("Device registered. Pair code:", pairCode);
-            }
-        } catch (error) {
-            console.error("Error registering device:", error);
-            // Retry after 10 seconds
-            setTimeout(() => {
-                hasRegisteredRef.current = false;
-                registerDevice();
-            }, 10000);
-        }
-    };
-
-    const handleConnected = useCallback(
-        async (onLog) => {
-            const log = (msg) => {
-                console.log(msg);
-                if (onLog) onLog(msg);
-            };
-
-            log("🔔 [HANDLE_CONNECTED] Callback triggered");
-
-            // وقتی token دریافت شد، مستقیماً به WebView برو
-            log("🔍 [HANDLE_CONNECTED] Getting token from storage...");
-            const token = await tokenService.get();
-            log(`🔑 [HANDLE_CONNECTED] Token retrieved: ${token ? token.substring(0, 20) + "..." : "NO TOKEN"}`);
-
-            if (token) {
-                log("✅ [HANDLE_CONNECTED] Token exists, redirecting to WebView...");
-
-                // Cleanup intervals
-                log("🧹 [HANDLE_CONNECTED] Cleaning up intervals...");
-                if (activateIntervalRef.current) {
-                    clearInterval(activateIntervalRef.current);
-                    activateIntervalRef.current = null;
-                    log("✅ [HANDLE_CONNECTED] activateInterval cleared");
-                }
-                if (networkCheckIntervalRef.current) {
-                    clearInterval(networkCheckIntervalRef.current);
-                    networkCheckIntervalRef.current = null;
-                    log("✅ [HANDLE_CONNECTED] networkCheckInterval cleared");
-                }
-
-                // مستقیماً به WebView برو (token از سرور دریافت شده، نیازی به auth() دوباره نیست)
-                log(`🔄 [HANDLE_CONNECTED] Setting screen to 'webview'... (current: ${screenRef.current})`);
-                setScreen("webview");
-                log("✅ [HANDLE_CONNECTED] Screen state updated to 'webview'");
-
-                log("🚀 [HANDLE_CONNECTED] Starting WebView mode...");
-                startWebViewMode();
-                log("✅ [HANDLE_CONNECTED] WebView mode started");
-
-                // در background auth رو چک کن (برای validation)
-                log("🔐 [HANDLE_CONNECTED] Validating token in background...");
-                try {
-                    await deviceService.auth();
-                    log("✅ [HANDLE_CONNECTED] Token validated successfully");
-                } catch (error) {
-                    log(`❌ [HANDLE_CONNECTED] Auth validation error: ${error?.message || error}`);
-
-                    // فقط اگر 401 بود (token نامعتبر)، به OfflineScreen برگرد
-                    if (error?.response?.status === 401) {
-                        log("❌ [HANDLE_CONNECTED] Token is invalid (401), removing token...");
-                        await tokenService.remove();
-                        await pairCodeService.remove();
-                        hasRegisteredRef.current = false;
-                        setScreen("offline");
-                        log("🔄 [HANDLE_CONNECTED] Switched back to offline screen");
-                    } else {
-                        // خطاهای دیگر (network, etc.) - ignore کن، token معتبره
-                        log(`⚠️ [HANDLE_CONNECTED] Auth check failed (non-401 error), but token exists: ${error?.message}`);
-                    }
-                }
-            } else {
-                log("❌ [HANDLE_CONNECTED] No token found! Cannot redirect to WebView.");
-            }
-        },
-        [startWebViewMode],
-    );
+    // Handler: وقتی کاربر logout کرد
+    const handleLogout = useCallback(async () => {
+        console.log("🚪 [LOGOUT] User logged out");
+        await tokenService.remove();
+        await pairCodeService.remove();
+        setScreen("offline");
+    }, []);
 
     // Wait for fonts to load
     if (!fontsLoaded && !fontError) {
         return null;
     }
 
-    // Render
+    // Render: Loading Screen - نگه داشتن splash screen تا ready بشه
     if (isChecking) {
+        // نگه داشتن splash screen native (بجای نمایش loading سیاه)
+        return null;
+    }
+
+    // Render: Offline Screen
+    if (screen === "offline") {
         return (
-            <View style={styles.container}>
-                <StatusBar hidden={true} />
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#2962FF" />
-                </View>
-            </View>
+            <QueryClientProvider client={queryClient}>
+                <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
+            </QueryClientProvider>
         );
     }
 
-    if (screen === "offline") {
-        return <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />;
-    }
-
-    if (screen === "webview") {
+    // Render: Home Screen
+    if (screen === "home") {
         return (
-            <View style={styles.container}>
-                <StatusBar hidden={true} />
-                <BridgeWebView
-                    webViewUrl={WEBVIEW_URL}
-                    onError={(error) => {
-                        console.error("WebView error:", error);
-                        // فقط برای خطاهای critical به OfflineScreen برگرد
-                        // خطاهای network رو ignore کن تا از کش استفاده کنه
-                        const isNetworkError = error?.message?.includes("network") || error?.message?.includes("ERR_INTERNET_DISCONNECTED") || error?.message?.includes("ERR_ADDRESS_UNREACHABLE");
-
-                        if (!isNetworkError) {
-                            // فقط برای خطاهای غیر network به OfflineScreen برگرد
-                            console.log("⚠️ Critical WebView error, switching to OfflineScreen");
-                            if (activateIntervalRef.current) {
-                                clearInterval(activateIntervalRef.current);
-                                activateIntervalRef.current = null;
-                            }
-                            if (networkCheckIntervalRef.current) {
-                                clearInterval(networkCheckIntervalRef.current);
-                                networkCheckIntervalRef.current = null;
-                            }
-                            setScreen("offline");
-                        } else {
-                            console.log("⚠️ Network error in WebView, will use cached content");
-                        }
-                    }}
-                    onTokenInvalid={async () => {
-                        console.log("🔄 [TOKEN] Token invalid, switching to OfflineScreen");
-                        // Cleanup intervals
-                        if (activateIntervalRef.current) {
-                            clearInterval(activateIntervalRef.current);
-                            activateIntervalRef.current = null;
-                        }
-                        if (networkCheckIntervalRef.current) {
-                            clearInterval(networkCheckIntervalRef.current);
-                            networkCheckIntervalRef.current = null;
-                        }
-                        if (tokenValidationIntervalRef.current) {
-                            clearInterval(tokenValidationIntervalRef.current);
-                            tokenValidationIntervalRef.current = null;
-                        }
-                        // Reset registration flag
-                        hasRegisteredRef.current = false;
-                        // برگشت به OfflineScreen برای pairing جدید
-                        setScreen("offline");
-                    }}
-                />
-            </View>
+            <QueryClientProvider client={queryClient}>
+                <HomeScreen onLogout={handleLogout} />
+            </QueryClientProvider>
         );
     }
 
