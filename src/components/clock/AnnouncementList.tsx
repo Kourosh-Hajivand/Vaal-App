@@ -1,41 +1,126 @@
 /**
  * Announcement List Component
- * نمایش لیست اطلاعیه‌ها با format زیبا
+ * نمایش لیست اطلاعیه‌ها به سبک iPhone notifications
+ * با auto-rotation و انیمیشن نرم
  */
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { View, StyleSheet } from "react-native";
+import Animated, { useAnimatedStyle, withTiming, useSharedValue, Layout, FadeOut } from "react-native-reanimated";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
 import { useDeviceAnnouncements } from "@/src/hooks/announcement/useDeviceAnnouncements";
 import { getIranTime, formatRelativeTime, formatPersianDateShort } from "@/src/utils/time/iranTime";
 import { useOnlineStatus } from "@/src/hooks/use-online-status";
 import { useTheme } from "@/src/contexts/ThemeContext";
-import Svg, { Path, Defs, LinearGradient, Stop } from "react-native-svg";
+import Svg, { Path, Defs, LinearGradient, Stop, Circle } from "react-native-svg";
+
+// Type-based configuration
+const TYPE_CONFIG = {
+    success: {
+        backgroundColor: "#DCFFDC",
+        iconColor: "#00D900",
+        icon: "success",
+    },
+    info: {
+        backgroundColor: "#FFF8DC",
+        iconColor: "#ECBD00",
+        icon: "info",
+    },
+    warning: {
+        backgroundColor: "#FFE8DC",
+        iconColor: "#FD5C02",
+        icon: "warning",
+    },
+    urgent: {
+        backgroundColor: "#FFE1E1",
+        iconColor: "#FF3B30",
+        icon: "urgent",
+    },
+};
+
+// Icon Components
+const SuccessIcon = ({ color }: { color: string }) => (
+    <Svg width={10} height={10} viewBox="0 0 10 10" fill="none">
+        <Path
+            d="M3.5 5.375L4.625 6.5L6.5 3.875M9.5 5C9.5 5.59095 9.3836 6.17611 9.15746 6.72208C8.93131 7.26804 8.59984 7.76412 8.18198 8.18198C7.76412 8.59984 7.26804 8.93131 6.72208 9.15746C6.17611 9.3836 5.59095 9.5 5 9.5C4.40905 9.5 3.82389 9.3836 3.27792 9.15746C2.73196 8.93131 2.23588 8.59984 1.81802 8.18198C1.40016 7.76412 1.06869 7.26804 0.842542 6.72208C0.616396 6.17611 0.5 5.59095 0.5 5C0.5 3.80653 0.974106 2.66193 1.81802 1.81802C2.66193 0.974106 3.80653 0.5 5 0.5C6.19347 0.5 7.33807 0.974106 8.18198 1.81802C9.02589 2.66193 9.5 3.80653 9.5 5Z"
+            stroke={color}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+const InfoIcon = ({ color }: { color: string }) => (
+    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+        <Path
+            d="M7 3.5V7H9.625M12.25 7C12.25 7.68944 12.1142 8.37213 11.8504 9.00909C11.5865 9.64605 11.1998 10.2248 10.7123 10.7123C10.2248 11.1998 9.64605 11.5865 9.00909 11.8504C8.37213 12.1142 7.68944 12.25 7 12.25C6.31056 12.25 5.62787 12.1142 4.99091 11.8504C4.35395 11.5865 3.7752 11.1998 3.28769 10.7123C2.80018 10.2248 2.41347 9.64605 2.14963 9.00909C1.8858 8.37213 1.75 7.68944 1.75 7C1.75 5.60761 2.30312 4.27226 3.28769 3.28769C4.27226 2.30312 5.60761 1.75 7 1.75C8.39239 1.75 9.72774 2.30312 10.7123 3.28769C11.6969 4.27226 12.25 5.60761 12.25 7Z"
+            stroke={color}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </Svg>
+);
+
+const WarningIcon = ({ color }: { color: string }) => (
+    <Svg width={14} height={14} viewBox="0 0 12 11" fill="none">
+        <Path
+            d="M6.59188 9.75142H4.58982C2.18166 9.75142 0.977585 9.75142 0.533866 8.96814C0.0901463 8.18491 0.706009 7.14659 1.93774 5.07L2.93878 3.38228C4.12196 1.38752 4.71354 0.390137 5.59085 0.390137C6.46816 0.390137 7.05974 1.38751 8.2429 3.38227L9.24398 5.07C10.4757 7.14659 11.0915 8.18491 10.6478 8.96814C10.2041 9.75142 9.00002 9.75142 6.59188 9.75142Z"
+            stroke={color}
+            strokeWidth="0.780107"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+        <Path d="M5.59119 2.80957V6.32005" stroke={color} strokeWidth="0.780107" strokeLinecap="round" strokeLinejoin="round" />
+        <Path d="M5.59119 7.83887V7.84702" stroke={color} strokeWidth="0.936128" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+);
+
+const UrgentIcon = ({ color }: { color: string }) => (
+    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+        <Circle cx="7" cy="7" r="6" stroke={color} strokeWidth="1.2" />
+        <Path d="M7 4V7.5M7 10H7.01" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+);
+
+const AnnouncementIcon = ({ type }: { type: string }) => {
+    const config = TYPE_CONFIG[type as keyof typeof TYPE_CONFIG] || TYPE_CONFIG.info;
+
+    switch (config.icon) {
+        case "success":
+            return <SuccessIcon color={config.iconColor} />;
+        case "info":
+            return <InfoIcon color={config.iconColor} />;
+        case "warning":
+            return <WarningIcon color={config.iconColor} />;
+        case "urgent":
+            return <UrgentIcon color={config.iconColor} />;
+        default:
+            return <InfoIcon color={config.iconColor} />;
+    }
+};
 
 export const AnnouncementList: React.FC = () => {
     const { data: announcements, isLoading, dataUpdatedAt, isFetching, isRefetching } = useDeviceAnnouncements();
     const { isOnline } = useOnlineStatus();
     const { colors } = useTheme();
+    const [displayedAnnouncements, setDisplayedAnnouncements] = useState<any[]>([]);
     const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
     const lastFetchTimeRef = useRef<number | null>(null);
     const previousIsOnlineRef = useRef<boolean>(true);
     const wasRefetchingRef = useRef<boolean>(false);
 
-    // Track آخرین fetch time - فقط وقتی online است و fetch واقعی انجام شده
+    // Track آخرین fetch time
     useEffect(() => {
-        // اگر lastFetchTime نداریم و dataUpdatedAt داریم، آن را set کن (اولین بار)
         if (!lastFetchTimeRef.current && dataUpdatedAt) {
             setLastFetchTime(dataUpdatedAt);
             lastFetchTimeRef.current = dataUpdatedAt;
             return;
         }
 
-        // Track کردن isRefetching یا isFetching برای تشخیص fetch واقعی
         if (isRefetching || isFetching) {
             wasRefetchingRef.current = true;
         }
 
-        // فقط وقتی online است و fetch واقعی انجام شده، lastFetchTime رو به‌روز کن
         if (isOnline && dataUpdatedAt && !isFetching && !isRefetching) {
             if (wasRefetchingRef.current) {
                 if (!lastFetchTimeRef.current || dataUpdatedAt > lastFetchTimeRef.current) {
@@ -47,7 +132,6 @@ export const AnnouncementList: React.FC = () => {
         }
     }, [dataUpdatedAt, isOnline, isFetching, isRefetching]);
 
-    // وقتی از online به offline می‌رود، lastFetchTime رو نگه دار
     useEffect(() => {
         if (!isOnline && previousIsOnlineRef.current) {
             if (dataUpdatedAt && (!lastFetchTimeRef.current || dataUpdatedAt > lastFetchTimeRef.current)) {
@@ -58,7 +142,7 @@ export const AnnouncementList: React.FC = () => {
         previousIsOnlineRef.current = isOnline;
     }, [isOnline, dataUpdatedAt]);
 
-    // فیلتر و مرتب‌سازی announcements
+    // فیلتر announcements
     const filteredAnnouncements = useMemo(() => {
         if (!announcements || announcements.length === 0) return [];
 
@@ -66,17 +150,14 @@ export const AnnouncementList: React.FC = () => {
 
         return announcements
             .filter((announcement) => {
-                // فقط active announcements
                 if (announcement.status !== "active") return false;
 
-                // بررسی start_date
                 if (announcement.start_date) {
                     const startDate = new Date(announcement.start_date);
                     if (isNaN(startDate.getTime())) return false;
                     if (now < startDate) return false;
                 }
 
-                // بررسی end_date
                 if (announcement.end_date) {
                     const endDate = new Date(announcement.end_date);
                     if (isNaN(endDate.getTime())) return true;
@@ -88,22 +169,54 @@ export const AnnouncementList: React.FC = () => {
             .sort((a, b) => {
                 const dateA = new Date(a.created_at).getTime();
                 const dateB = new Date(b.created_at).getTime();
-                return dateB - dateA; // جدیدترین اول
-            })
-            .slice(0, 4); // حداکثر 4 تا
+                return dateB - dateA;
+            });
     }, [announcements]);
 
-    // به‌روزرسانی خودکار زمان نسبی هر 10 ثانیه
+    const currentIndexRef = useRef(0);
+
+    // Initialize displayed announcements (نمایش 3 تا اول)
+    useEffect(() => {
+        if (filteredAnnouncements.length > 0) {
+            setDisplayedAnnouncements(filteredAnnouncements.slice(0, 3));
+            currentIndexRef.current = 0;
+        }
+    }, [filteredAnnouncements.length]);
+
+    // Auto-rotate: هر 5 ثانیه یکی از بالا بره آخر
+    useEffect(() => {
+        if (filteredAnnouncements.length <= 3) return;
+
+        const timer = setInterval(() => {
+            setDisplayedAnnouncements((current) => {
+                if (current.length === 0) return current;
+
+                // حذف اولی و اضافه کردن یکی جدید
+                const [, ...rest] = current;
+
+                // Index بعدی در لیست کامل (circular)
+                currentIndexRef.current = (currentIndexRef.current + 1) % filteredAnnouncements.length;
+                const nextIndex = (currentIndexRef.current + 2) % filteredAnnouncements.length;
+                const nextItem = filteredAnnouncements[nextIndex];
+
+                return [...rest, nextItem];
+            });
+        }, 5 * 1000);
+
+        return () => clearInterval(timer);
+    }, [filteredAnnouncements]);
+
+    // به‌روزرسانی خودکار زمان نسبی
     const [updateTrigger, setUpdateTrigger] = useState(0);
     useEffect(() => {
         const interval = setInterval(() => {
             setUpdateTrigger((prev) => prev + 1);
-        }, 10000); // هر 10 ثانیه
+        }, 10000);
 
         return () => clearInterval(interval);
     }, []);
 
-    // آخرین به‌روزرسانی - زمان نسبی
+    // آخرین به‌روزرسانی
     const lastUpdate = useMemo(() => {
         if (lastFetchTime) {
             const relativeTime = formatRelativeTime(new Date(lastFetchTime).toISOString());
@@ -155,52 +268,82 @@ export const AnnouncementList: React.FC = () => {
                 </View>
             </View>
 
-            {/* Announcements List */}
+            {/* Announcements List با انیمیشن carousel */}
             <View style={styles.list}>
-                {filteredAnnouncements.map((announcement) => (
-                    <View key={announcement.id} style={[styles.announcementItem, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                        {/* Content */}
-                        <View style={styles.announcementContent}>
-                            {/* Text Container - flex: 1 */}
-                            <View style={styles.textContainer}>
-                                {/* Row 1: Title + Date در یک خط */}
-                                <View style={styles.titleRow}>
-                                    <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
-                                        {formatPersianDateShort(announcement.created_at)}
-                                    </CustomText>
-
-                                    <CustomText fontType="YekanBakh" weight="SemiBold" size={11} applyThemeColor={true}>
-                                        {announcement.title}
-                                    </CustomText>
-                                </View>
-
-                                {/* Row 2: Message (اگر داشته باشه) */}
-                                {announcement.message && (
-                                    <CustomText fontType="YekanBakh" weight="Regular" size={12} applyThemeColor={false} style={{ color: colors.text, opacity: 0.8, textAlign: "right" }}>
-                                        {announcement.message}
-                                    </CustomText>
-                                )}
-                            </View>
-
-                            {/* Warning Icon - سمت راست */}
-                            <View style={[styles.iconContainer, { backgroundColor: colors.warning }]}>
-                                <Svg width={12} height={14} viewBox="0 0 12 11" fill="none">
-                                    <Path
-                                        d="M6.59188 9.75142H4.58982C2.18166 9.75142 0.977585 9.75142 0.533866 8.96814C0.0901463 8.18491 0.706009 7.14659 1.93774 5.07L2.93878 3.38228C4.12196 1.38752 4.71354 0.390137 5.59085 0.390137C6.46816 0.390137 7.05974 1.38751 8.2429 3.38227L9.24398 5.07C10.4757 7.14659 11.0915 8.18491 10.6478 8.96814C10.2041 9.75142 9.00002 9.75142 6.59188 9.75142Z"
-                                        stroke="#FD5C02"
-                                        strokeWidth="0.780107"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                    <Path d="M5.59119 2.80957V6.32005" stroke="#FD5C02" strokeWidth="0.780107" strokeLinecap="round" strokeLinejoin="round" />
-                                    <Path d="M5.59119 7.83887V7.84702" stroke="#FD5C02" strokeWidth="0.936128" strokeLinecap="round" strokeLinejoin="round" />
-                                </Svg>
-                            </View>
-                        </View>
-                    </View>
+                {displayedAnnouncements.map((announcement, index) => (
+                    <AnimatedAnnouncementItem key={announcement.id} announcement={announcement} colors={colors} index={index} />
                 ))}
             </View>
         </ThemedView>
+    );
+};
+
+// Animated Announcement Item Component
+interface AnimatedAnnouncementItemProps {
+    announcement: any;
+    colors: any;
+    index: number;
+}
+
+const AnimatedAnnouncementItem: React.FC<AnimatedAnnouncementItemProps> = ({ announcement, colors, index }) => {
+    const config = TYPE_CONFIG[announcement.type as keyof typeof TYPE_CONFIG] || TYPE_CONFIG.info;
+
+    // Scale animation: از 0.7 به 1 (بدون bounce)
+    const scale = useSharedValue(0.7);
+    const opacity = useSharedValue(0);
+
+    useEffect(() => {
+        // Smooth scale up بدون bounce
+        scale.value = withTiming(1, {
+            duration: 500,
+        });
+        opacity.value = withTiming(1, {
+            duration: 400,
+        });
+    }, [announcement.id]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+        opacity: opacity.value,
+    }));
+
+    return (
+        <Animated.View
+            style={animatedStyle}
+            layout={Layout.duration(500)} // برای smooth transition وقتی position عوض میشه
+            exiting={FadeOut.duration(400)} // وقتی item حذف میشه
+        >
+            <View style={[styles.announcementItem, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                {/* Content */}
+                <View style={styles.announcementContent}>
+                    {/* Text Container */}
+                    <View style={styles.textContainer}>
+                        {/* Row 1: Title + Date در یک خط */}
+                        <View style={styles.titleRow}>
+                            <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
+                                {formatPersianDateShort(announcement.created_at)}
+                            </CustomText>
+
+                            <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
+                                {announcement.title}
+                            </CustomText>
+                        </View>
+
+                        {/* Row 2: Message */}
+                        {announcement.message && (
+                            <CustomText fontType="YekanBakh" weight="Regular" size={10} applyThemeColor={false} style={{ color: colors.text, opacity: 0.8, textAlign: "right" }}>
+                                {announcement.message}
+                            </CustomText>
+                        )}
+                    </View>
+
+                    {/* Icon - سمت راست با background رنگی */}
+                    <View style={[styles.iconContainer, { backgroundColor: config.backgroundColor }]}>
+                        <AnnouncementIcon type={announcement.type} />
+                    </View>
+                </View>
+            </View>
+        </Animated.View>
     );
 };
 
@@ -225,35 +368,37 @@ const styles = StyleSheet.create({
         alignItems: "center",
         gap: 4,
     },
-    headerTitle: {
-        // color از theme
-    },
     list: {
         flexDirection: "column",
         gap: 8,
     },
     announcementItem: {
-        // backgroundColor و borderColor dynamic از theme
         borderRadius: 16,
-        paddingVertical: 8,
-        paddingHorizontal: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
         borderWidth: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        gap: 12,
+        // backgroundColor dynamic از type
+        // shadowColor و shadowOffset برای iOS
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        // elevation برای Android
+        elevation: 2,
     },
-
     announcementContent: {
-        flex: 1,
         flexDirection: "row",
         alignItems: "flex-start",
         justifyContent: "flex-end",
-        gap: 8,
+        gap: 10,
     },
     textContainer: {
         flex: 1,
         alignItems: "flex-end",
+        gap: 6,
     },
     titleRow: {
         width: "100%",
@@ -261,18 +406,23 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "space-between",
     },
-    titleText: {
-        textAlign: "right",
-    },
-    messageText: {
-        textAlign: "right",
-    },
     iconContainer: {
-        width: 18,
-        height: 18,
-        // backgroundColor dynamic از theme (warning color با 20% opacity)
+        width: 24,
+        height: 24,
         borderRadius: 12,
         alignItems: "center",
         justifyContent: "center",
+    },
+    pagination: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        marginTop: 12,
+    },
+    dot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
     },
 });
