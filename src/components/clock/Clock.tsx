@@ -11,6 +11,7 @@ import { ThemedView } from "../shared/ThemedView";
 import { Weather } from "./Weather";
 import { AnnouncementList } from "./AnnouncementList";
 import { ContactsBar } from "./ContactsBar";
+import CloudLayer from "./CloudLayer";
 import { Emergency } from "./Emergency";
 import { useDeviceInfo, useRandomSnippet } from "@/src/hooks/device/useDeviceInfo";
 import { getIranTime, getPersianDayOfMonth, getPersianDayOfWeek, getPersianMonthName, isDayTime } from "@/src/utils/time/iranTime";
@@ -33,6 +34,7 @@ const formatTimeWithoutSeconds = (date: Date): string => {
 export const Clock: React.FC = () => {
     const [time, setTime] = useState<Date>(getIranTime());
     const [imageError, setImageError] = useState(false);
+    const [contentWidth, setContentWidth] = useState(0);
     const { colors, isDark } = useTheme();
 
     const { data: device, isLoading } = useDeviceInfo();
@@ -88,7 +90,8 @@ export const Clock: React.FC = () => {
             {(!backgroundImage || imageError) && <View style={[styles.gradientFallback, { backgroundColor: "transparent" }]} />}
 
             {/* Content Container */}
-            <View style={styles.contentContainer}>
+            <View style={styles.contentContainer} onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}>
+                {contentWidth > 0 && <CloudLayer contentWidth={contentWidth} />}
                 {/* Header: Building info */}
                 <View style={styles.header}>
                     <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: "white" }}>
