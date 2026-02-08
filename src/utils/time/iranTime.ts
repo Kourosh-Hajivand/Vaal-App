@@ -91,3 +91,70 @@ export const isDayTime = (date: Date): boolean => {
 export const isNightTime = (date: Date): boolean => {
     return !isDayTime(date);
 };
+
+/**
+ * تبدیل اعداد انگلیسی به فارسی
+ */
+const englishToPersian = (str: string): string => {
+    const persianNumbers = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const englishNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    let result = str;
+    for (let i = 0; i < englishNumbers.length; i++) {
+        result = result.replace(new RegExp(englishNumbers[i], 'g'), persianNumbers[i]);
+    }
+    return result;
+};
+
+/**
+ * فرمت کردن تاریخ به صورت نسبی (مثل "5 دقیقه پیش")
+ */
+export const formatRelativeTime = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = getIranTime();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSeconds = Math.floor(diffMs / 1000);
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    const diffWeeks = Math.floor(diffDays / 7);
+    const diffMonths = Math.floor(diffDays / 30);
+    const diffYears = Math.floor(diffDays / 365);
+
+    if (diffSeconds < 60) {
+        if (diffSeconds < 10) {
+            return 'به تازگی';
+        }
+        const seconds = englishToPersian(diffSeconds.toString());
+        return `${seconds} ثانیه پیش`;
+    } else if (diffMinutes < 60) {
+        const minutes = englishToPersian(diffMinutes.toString());
+        return `${minutes} دقیقه پیش`;
+    } else if (diffHours < 24) {
+        const hours = englishToPersian(diffHours.toString());
+        return `${hours} ساعت پیش`;
+    } else if (diffDays < 7) {
+        const days = englishToPersian(diffDays.toString());
+        return `${days} روز پیش`;
+    } else if (diffWeeks < 4) {
+        const weeks = englishToPersian(diffWeeks.toString());
+        return `${weeks} هفته پیش`;
+    } else if (diffMonths < 12) {
+        const months = englishToPersian(diffMonths.toString());
+        return `${months} ماه پیش`;
+    } else {
+        const years = englishToPersian(diffYears.toString());
+        return `${years} سال پیش`;
+    }
+};
+
+/**
+ * فرمت تاریخ کوتاه شمسی (مثل "9 آبان")
+ */
+export const formatPersianDateShort = (dateString: string): string => {
+    const date = new Date(dateString);
+    const jDate = moment(date);
+    const day = jDate.jDate();
+    const monthName = jDate.format('jMMMM');
+    
+    return `${day} ${monthName}`;
+};

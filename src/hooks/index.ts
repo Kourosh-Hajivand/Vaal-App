@@ -3,25 +3,15 @@
  */
 
 // Device hooks
-export {
-    useRegisterDevice,
-    useActivateDevice,
-    useDeviceAuth,
-    useResetDevice,
-    useDeviceAnnouncements,
-    useDeviceManifest,
-    useDeviceWeather,
-    useDeviceInfo,
-    useUpdateDevice,
-    useDeviceEmergency,
-    useRandomSnippet,
-    useDeviceCategories,
-    useDeviceContacts,
-    deviceKeys,
-} from "./device/use-device";
+export { useRegisterDevice, useActivateDevice, useDeviceAuth, useResetDevice, useDeviceManifest, useDeviceWeather, useUpdateDevice, useDeviceEmergency, useDeviceCategories, deviceKeys } from "./device/use-device";
+
+// Device hooks (separated for better organization)
+export { useDeviceInfo, useRandomSnippet } from "./device/useDeviceInfo";
+export { useDeviceContacts } from "./device/useDeviceContacts";
 
 // Announcement hooks
 export { useAnnouncement, announcementKeys } from "./announcement/use-announcement";
+export { useDeviceAnnouncements } from "./announcement/useDeviceAnnouncements";
 
 // Content hooks
 export { useContent, contentKeys } from "./content/use-content";

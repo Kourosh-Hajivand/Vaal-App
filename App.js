@@ -3,6 +3,7 @@ import { StyleSheet, View, ActivityIndicator, StatusBar } from "react-native";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
@@ -224,7 +225,9 @@ export default function App() {
     if (screen === "offline") {
         return (
             <QueryClientProvider client={queryClient}>
-                <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
+                <ThemeProvider>
+                    <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
+                </ThemeProvider>
             </QueryClientProvider>
         );
     }
@@ -233,7 +236,9 @@ export default function App() {
     if (screen === "home") {
         return (
             <QueryClientProvider client={queryClient}>
-                <HomeScreen onLogout={handleLogout} />
+                <ThemeProvider>
+                    <HomeScreen onLogout={handleLogout} />
+                </ThemeProvider>
             </QueryClientProvider>
         );
     }

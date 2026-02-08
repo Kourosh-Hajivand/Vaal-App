@@ -396,18 +396,22 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: "#000",
+        borderRadius: 14,
+        overflow: 'hidden',
     },
     loadingContainer: {
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
         backgroundColor: "#1a1a1a",
+        borderRadius: 14,
+        overflow: 'hidden',
     },
     loadingContent: {
         alignItems: "center",
         padding: 30,
         backgroundColor: "rgba(255,255,255,0.05)",
-        borderRadius: 20,
+        borderRadius: 14,
         minWidth: 280,
     },
     loadingText: {
@@ -446,6 +450,8 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         backgroundColor: "#000",
+        borderRadius: 14,
+        overflow: 'hidden',
     },
     emptyText: {
         color: "#fff",

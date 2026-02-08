@@ -1,16 +1,21 @@
 import React, { useEffect, useState, useRef } from "react";
-import { StyleSheet, View, StatusBar, Platform, TouchableOpacity } from "react-native";
+import { StyleSheet, View, StatusBar, Platform, TouchableOpacity, Text } from "react-native";
 import { tokenService, deviceService } from "../src/services";
 import { pairCodeService } from "../src/services/pairCodeService";
 import * as NavigationBar from "expo-navigation-bar";
 import { Advertisement } from "../src/components/advertisement/Advertisement";
 import { Clock } from "../src/components/clock/Clock";
 import { SensorTestScreen } from "./SensorTestScreen";
+import { useTheme } from "../src/contexts/ThemeContext";
+import { useDeviceAuth } from "@/src/hooks";
 
-export default function HomeScreen({ onLogout }) {
+export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
+    const { colors, mode } = useTheme();
+    const deviceAuth = useDeviceAuth();
+
     const [showTestScreen, setShowTestScreen] = useState(false);
     const tapCountRef = useRef(0);
-    const tapTimerRef = useRef(null);
+    const tapTimerRef = useRef<number | null>(null);
     // Enable Kiosk Mode (Full Immersive)
     useEffect(() => {
         enableKioskMode();
@@ -40,7 +45,7 @@ export default function HomeScreen({ onLogout }) {
             try {
                 await deviceService.auth();
                 console.log("✅ [TOKEN] Token is valid");
-            } catch (error) {
+            } catch (error: any) {
                 if (error?.response?.status === 401) {
                     console.log("❌ [TOKEN] Token is invalid (401), logging out...");
                     await tokenService.remove();
@@ -70,7 +75,7 @@ export default function HomeScreen({ onLogout }) {
 
         // اگر 3 بار tap شد، Test Screen رو نشون بده
         if (tapCountRef.current === 3) {
-            console.log('🔧 Opening Sensor Test Screen');
+            console.log("🔧 Opening Sensor Test Screen");
             setShowTestScreen(true);
             tapCountRef.current = 0;
             return;
@@ -82,19 +87,15 @@ export default function HomeScreen({ onLogout }) {
         }, 1000);
     };
 
-    // اگر Test Screen فعال باشه، اونو نشون بده
     if (showTestScreen) {
         return (
-            <View style={styles.container}>
+            <View style={[styles.container, { backgroundColor: colors.background }]}>
                 <StatusBar hidden={true} />
                 <SensorTestScreen />
                 {/* دکمه بازگشت */}
-                <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => setShowTestScreen(false)}
-                >
+                <TouchableOpacity style={[styles.backButton, { backgroundColor: colors.info || "#2962FF" }]} onPress={() => setShowTestScreen(false)}>
                     <View style={styles.backButtonContent}>
-                        <View style={styles.backButtonText}>← Back</View>
+                        <Text style={styles.backButtonText}>← بازگشت</Text>
                     </View>
                 </TouchableOpacity>
             </View>
@@ -102,23 +103,19 @@ export default function HomeScreen({ onLogout }) {
     }
 
     return (
-        <View style={styles.container}>
-            {/* StatusBar کاملاً مخفی */}
-            <StatusBar hidden={true} />
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+            {/* StatusBar */}
+            <StatusBar hidden={true} barStyle={mode === "dark" ? "light-content" : "dark-content"} />
 
-            {/* Landscape Layout: Advertisement (70%) + Clock (30%) */}
-            <View style={styles.landscapeLayout}>
-                {/* Advertisement Section (70%) */}
+            {/* Layout: Advertisement (55%) + Clock (45%) */}
+            <View style={styles.mainLayout}>
+                {/* Advertisement Section (55%) */}
                 <View style={styles.advertisementSection}>
                     <Advertisement />
                 </View>
 
-                {/* Clock Section (30%) - Triple Tap to open Test Screen */}
-                <TouchableOpacity 
-                    style={styles.clockSection} 
-                    onPress={handleClockTap}
-                    activeOpacity={0.95}
-                >
+                {/* Clock Section (45%) - Triple Tap to open Test Screen */}
+                <TouchableOpacity style={styles.clockSection} onPress={handleClockTap} activeOpacity={0.95}>
                     <Clock />
                 </TouchableOpacity>
             </View>
@@ -129,42 +126,41 @@ export default function HomeScreen({ onLogout }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: "#000",
+        // backgroundColor dynamic از theme
     },
-    landscapeLayout: {
+    mainLayout: {
         flex: 1,
         flexDirection: "row",
+        padding: 24,
+        gap: 12,
     },
     advertisementSection: {
-        flex: 7, // 70% width
-        backgroundColor: "#000",
+        flex: 55, // 55% width
     },
     clockSection: {
-        flex: 3, // 30% width
-        backgroundColor: "#F5F5F5",
-        padding: 16,
+        flex: 45, // 45% width
     },
     backButton: {
-        position: 'absolute',
+        position: "absolute",
         top: 20,
         right: 20,
-        backgroundColor: '#2962FF',
+        // backgroundColor dynamic از theme
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 8,
         elevation: 5,
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.3,
         shadowRadius: 4,
     },
     backButtonContent: {
-        alignItems: 'center',
-        justifyContent: 'center',
+        alignItems: "center",
+        justifyContent: "center",
     },
     backButtonText: {
-        color: '#fff',
+        color: "#FFFFFF",
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: "bold",
     },
 });

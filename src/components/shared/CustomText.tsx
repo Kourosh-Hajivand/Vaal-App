@@ -1,10 +1,11 @@
 /**
  * Custom Text Component
  * Support for custom fonts: YekanBakh and Michroma
- * مشابه web version
+ * با پشتیبانی theme (safe fallback اگر ThemeProvider نباشه)
  */
 import React from 'react';
 import { Text, TextStyle, StyleProp } from 'react-native';
+import { useTheme } from '@/src/contexts/ThemeContext';
 
 export interface CustomTextProps {
     fontType: 'YekanBakh' | 'Michroma';
@@ -12,10 +13,27 @@ export interface CustomTextProps {
     size: number;
     style?: StyleProp<TextStyle>;
     children: React.ReactNode;
+    applyThemeColor?: boolean; // آیا color از theme بیاد؟
 }
 
-export const CustomText: React.FC<CustomTextProps> = ({ fontType, weight = 'Regular', size, style, children }) => {
+export const CustomText: React.FC<CustomTextProps> = ({ fontType, weight = 'Regular', size, style, children, applyThemeColor = true }) => {
     const fontFamily = `${fontType}-${weight}`;
+    
+    // Safe theme access - اگر ThemeProvider نباشه، crash نکن
+    let themeColor: string | undefined;
+    try {
+        const { colors } = useTheme();
+        themeColor = colors.text;
+    } catch (error) {
+        // ThemeProvider not found - use default color
+        themeColor = undefined;
+    }
 
-    return <Text style={[{ fontFamily, fontSize: size }, style]}>{children}</Text>;
+    const textStyle: StyleProp<TextStyle> = [
+        { fontFamily, fontSize: size }, 
+        applyThemeColor && themeColor && { color: themeColor }, 
+        style
+    ];
+
+    return <Text style={textStyle}>{children}</Text>;
 };
