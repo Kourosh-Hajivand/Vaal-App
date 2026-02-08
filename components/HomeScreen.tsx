@@ -8,10 +8,26 @@ import { Clock } from "../src/components/clock/Clock";
 import { SensorTestScreen } from "./SensorTestScreen";
 import { useTheme } from "../src/contexts/ThemeContext";
 import { useDeviceAuth } from "@/src/hooks";
+import { useOTAUpdate } from "@/src/hooks/useOTAUpdate";
+import { useAppUpdate } from "@/src/hooks/useAppUpdate";
 
 export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
     const { colors, mode } = useTheme();
     const deviceAuth = useDeviceAuth();
+
+    // OTA Update — آپدیت JS bundle هر 5 دقیقه
+    const otaUpdate = useOTAUpdate({
+        checkInterval: 5 * 60 * 1000, // هر 5 دقیقه
+        autoApply: true,
+        enabled: true,
+    });
+
+    // Native APK Update — چک APK جدید هر 30 دقیقه
+    const appUpdate = useAppUpdate({
+        checkInterval: 30 * 60 * 1000, // هر 30 دقیقه
+        autoInstall: true,
+        enabled: true,
+    });
 
     const [showTestScreen, setShowTestScreen] = useState(false);
     const tapCountRef = useRef(0);
@@ -115,9 +131,9 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
                 </View>
 
                 {/* Clock Section (45%) - Triple Tap to open Test Screen */}
-                <TouchableOpacity style={styles.clockSection} onPress={handleClockTap} activeOpacity={0.95}>
+                <View style={styles.clockSection}>
                     <Clock />
-                </TouchableOpacity>
+                </View>
             </View>
         </View>
     );
@@ -126,7 +142,6 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        // backgroundColor dynamic از theme
     },
     mainLayout: {
         flex: 1,
@@ -135,24 +150,21 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     advertisementSection: {
-        flex: 55, // 55% width
+        flex: 55,
+        borderRadius: 14,
+        overflow: "hidden",
     },
     clockSection: {
-        flex: 45, // 45% width
+        flex: 45,
     },
     backButton: {
         position: "absolute",
         top: 20,
         right: 20,
-        // backgroundColor dynamic از theme
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 8,
         elevation: 5,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
     },
     backButtonContent: {
         alignItems: "center",

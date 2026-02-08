@@ -25,5 +25,9 @@ export { useDeviceToken } from "./use-device-token";
 // Online Status hook
 export { useOnlineStatus } from "./use-online-status";
 
+// Update hooks — OTA (JS) + Native (APK)
+export { useOTAUpdate } from "./useOTAUpdate";
+export { useAppUpdate } from "./useAppUpdate";
+
 // ⚠️ Manager hooks حذف شدن چون این app فقط device است (React Native)
 // Manager hooks فقط برای web dashboard (Next.js) لازم هستن

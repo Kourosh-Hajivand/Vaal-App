@@ -2,9 +2,9 @@
  * Themed View Component
  * A reusable View component with theme support
  */
-import React from 'react';
-import { View, ViewStyle, StyleProp } from 'react-native';
-import { useTheme } from '@/src/contexts/ThemeContext';
+import React from "react";
+import { View, ViewStyle, StyleProp } from "react-native";
+import { useTheme } from "@/src/contexts/ThemeContext";
 
 export interface ThemedViewProps {
     style?: StyleProp<ViewStyle>;

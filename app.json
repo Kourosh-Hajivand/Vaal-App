@@ -1,59 +1,73 @@
 {
-    "expo": {
-        "name": "Vaal",
-        "slug": "Vaal",
-        "version": "1.0.0",
-        "orientation": "landscape",
-        "icon": "./assets/Logo.png",
-        "scheme": "vaal",
-        "userInterfaceStyle": "automatic",
-        "newArchEnabled": true,
-        "splash": {
-            "image": "./assets/Logo.png",
-            "resizeMode": "contain",
-            "backgroundColor": "#FF6F3C"
-        },
-        "ios": {
-            "supportsTablet": true,
-            "bundleIdentifier": "com.anonymous.SensorMonitor"
-        },
-        "android": {
-            "adaptiveIcon": {
-                "backgroundColor": "#FF6F3C",
-                "foregroundImage": "./assets/Logo.png"
-            },
-            "edgeToEdgeEnabled": true,
-            "predictiveBackGestureEnabled": false,
-            "package": "com.anonymous.SensorMonitor",
-            "navigationBar": {
-                "visible": "immersive",
-                "behavior": "overlay-swipe"
-            },
-            "softwareKeyboardLayoutMode": "pan",
-            "userInterfaceStyle": "dark",
-            "statusBar": {
-                "hidden": true
-            }
-        },
-        "web": {
-            "output": "static",
-            "favicon": "./assets/Logo.png"
-        },
-        "plugins": [
-            "expo-router",
-            "expo-secure-store",
-            [
-                "expo-splash-screen",
-                {
-                    "image": "./assets/Logo.png",
-                    "resizeMode": "contain",
-                    "backgroundColor": "#FF6F3C"
-                }
-            ]
-        ],
-        "experiments": {
-            "typedRoutes": true,
-            "reactCompiler": true
+  "expo": {
+    "name": "Vaal",
+    "slug": "Vaal",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "icon": "./assets/Logo.png",
+    "scheme": "vaal",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "enabled": true,
+      "url": "https://u.expo.dev/e88a7f52-0289-409e-a4db-73463edd8c6b",
+      "fallbackToCacheTimeout": 5000,
+      "checkAutomatically": "ON_LOAD"
+    },
+    "splash": {
+      "image": "./assets/Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF6F3C"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.SensorMonitor"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FF6F3C",
+        "foregroundImage": "./assets/Logo.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.SensorMonitor",
+      "navigationBar": {
+        "visible": "immersive",
+        "behavior": "overlay-swipe"
+      },
+      "softwareKeyboardLayoutMode": "pan",
+      "userInterfaceStyle": "dark",
+      "statusBar": {
+        "hidden": true
+      }
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/Logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/Logo.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FF6F3C"
         }
-    }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e88a7f52-0289-409e-a4db-73463edd8c6b"
+      }
+    },
+    "owner": "kouroshh"
+  }
 }

@@ -37,7 +37,7 @@ export const LIGHT_THEME: ThemeColors = {
  * Dark Theme Colors
  */
 export const DARK_THEME: ThemeColors = {
-    background: "#1A1A1A",
+    background: "#080F18",
     text: "#FFFFFF",
     border: "#333333",
     cardBackground: "#2A2A2A",

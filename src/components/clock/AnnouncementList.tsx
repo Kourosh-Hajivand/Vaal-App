@@ -271,10 +271,15 @@ const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
         <Animated.View style={[slotMargin, { zIndex: 10 - slot }]} layout={Layout.duration(DUR).easing(EASE)} exiting={ExitAnimation} entering={FadeIn.duration(DUR)}>
             {/* Inner: scale + opacity animation */}
             <Animated.View style={innerStyle}>
-                <BlurView
-                    intensity={isDark ? 40 : 60}
-                    tint={isDark ? "dark" : "light"}
-                    style={[styles.card, { borderColor: isDark ? "#394753" : colors.border, backgroundColor: isDark ? "rgba(34,50,64,0.55)" : "rgba(255,255,255,0.7)", overflow: "hidden" }]}
+                <View
+                    style={[
+                        styles.card,
+                        {
+                            borderColor: isDark ? "#394753" : colors.border,
+                            backgroundColor: isDark ? "#192634" : "rgba(255,255,255,1)",
+                            overflow: "hidden",
+                        },
+                    ]}
                 >
                     <View style={styles.row}>
                         <View style={styles.textArea}>
@@ -296,7 +301,7 @@ const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
                             <AIcon type={data.type} isDark={isDark} />
                         </View>
                     </View>
-                </BlurView>
+                </View>
             </Animated.View>
         </Animated.View>
     );
@@ -308,7 +313,7 @@ const styles = StyleSheet.create({
     header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 12 },
     headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
     stack: { width: "100%", paddingBottom: 8 },
-    card: { borderRadius: 16, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+    card: { borderRadius: 16, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 0.382 },
     row: { flexDirection: "row", alignItems: "flex-start", justifyContent: "flex-end", gap: 10 },
     textArea: { flex: 1, alignItems: "flex-end", gap: 4 },
     titleRow: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

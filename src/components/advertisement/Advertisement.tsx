@@ -39,7 +39,6 @@ export const Advertisement: React.FC = () => {
     const { data: manifest, isLoading, error } = useDeviceManifest();
     const { isPresence, isConnected: isSensorConnected, distance, statusText } = useRadarSensor();
     const { isOnline, connectionType } = useOnlineStatus();
-
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);

@@ -10,7 +10,9 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "build:debug": "cd android && ./gradlew assembleDebug && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/debug/app-debug.apk'",
-    "build:release": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/release/app-release.apk'"
+    "build:release": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/release/app-release.apk'",
+    "update:production": "eas update --branch production --message",
+    "update:preview": "eas update --branch preview --message"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -40,6 +42,7 @@
     "expo-status-bar": "~3.0.8",
     "expo-symbols": "~1.0.7",
     "expo-system-ui": "~6.0.8",
+    "expo-updates": "~29.0.16",
     "expo-web-browser": "~15.0.9",
     "moment-jalaali": "^0.10.4",
     "moment-timezone": "^0.6.0",

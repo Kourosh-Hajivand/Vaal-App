@@ -17,6 +17,8 @@ export const routes = {
         snippetsRandom: () => "/api/devices/snippets/random",
         categories: () => "/api/devices/categories",
         contacts: () => "/api/devices/contacts",
+        /** چک ورژن APK جدید — باید در backend پیاده‌سازی بشه */
+        checkAppVersion: () => "/api/devices/app-version",
     },
     manager: {
         login: () => "/api/manager/login",

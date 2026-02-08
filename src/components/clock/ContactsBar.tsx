@@ -3,15 +3,16 @@
  * نمایش مخاطبین ساختمان
  */
 import React from "react";
-import { View, StyleSheet, Linking } from "react-native";
+import { View, StyleSheet, Linking, Platform } from "react-native";
 import { CustomText } from "../shared/CustomText";
 import { useDeviceContacts } from "@/src/hooks/device/useDeviceContacts";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import Svg, { Path } from "react-native-svg";
+import { BlurView } from "expo-blur";
 
 export const ContactsBar: React.FC = () => {
     const { data: contacts, isLoading } = useDeviceContacts();
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
 
     const handleCall = (phone: string) => {
         Linking.openURL(`tel:${phone}`);
@@ -22,33 +23,22 @@ export const ContactsBar: React.FC = () => {
     return (
         <View style={styles.container}>
             {contacts.map((contact, index) => (
-                <View 
-                    key={`${contact.name}-${contact.phone}-${index}`} 
+                <View
+                    key={`${contact.name}-${contact.phone}-${index}`}
                     style={[
                         styles.contactItem,
                         {
-                            backgroundColor: colors.cardBackground,
-                            borderColor: colors.border,
-                        }
+                            borderColor: "rgba(255, 255, 255, 0.20)",
+                            backgroundColor: isDark ? "#192634" : "rgba(255,255,255,1)",
+                            overflow: "hidden",
+                        },
                     ]}
                 >
                     <View style={styles.contactInfo}>
-                        <CustomText 
-                            fontType="YekanBakh" 
-                            weight="Regular" 
-                            size={9}
-                            applyThemeColor={false}
-                            style={{ color: colors.text, opacity: 0.6 }}
-                        >
+                        <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.8 }}>
                             {contact.phone}
                         </CustomText>
-                        <CustomText 
-                            fontType="YekanBakh" 
-                            weight="Regular" 
-                            size={9}
-                            applyThemeColor={false}
-                            style={{ color: colors.text, opacity: 0.5 }}
-                        >
+                        <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.8 }}>
                             {contact.role}:
                         </CustomText>
                     </View>
@@ -71,11 +61,13 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
         gap: 4,
-        // backgroundColor و borderColor dynamic از theme
-        borderRadius: 20,
+        borderRadius: 99,
+        borderWidth: 0.382,
+        borderColor: "rgba(255, 255, 255, 0.20)",
+
         paddingHorizontal: 8,
         paddingVertical: 4,
-        borderWidth: 1,
+        overflow: "hidden",
     },
     contactInfo: {
         flexDirection: "row",

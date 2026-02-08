@@ -16,6 +16,7 @@ import { useDeviceInfo, useRandomSnippet } from "@/src/hooks/device/useDeviceInf
 import { getIranTime, getPersianDayOfMonth, getPersianDayOfWeek, getPersianMonthName, isDayTime } from "@/src/utils/time/iranTime";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import Svg, { Path } from "react-native-svg";
+import { BlurView } from "expo-blur";
 
 const formatTimeWithoutSeconds = (date: Date): string => {
     let hours = date.getHours();
@@ -84,7 +85,7 @@ export const Clock: React.FC = () => {
             )}
 
             {/* Gradient fallback - رنگ بر اساس theme */}
-            {(!backgroundImage || imageError) && <View style={[styles.gradientFallback, { backgroundColor: colors.errorBackground }]} />}
+            {(!backgroundImage || imageError) && <View style={[styles.gradientFallback, { backgroundColor: "transparent" }]} />}
 
             {/* Content Container */}
             <View style={styles.contentContainer}>
@@ -106,7 +107,8 @@ export const Clock: React.FC = () => {
                     </CustomText>
 
                     {/* Date & Weather */}
-                    <View style={[styles.dateWeather, { backgroundColor: isDark ? "rgba(0, 0, 0, 0.20);" : "#F8F8F8" }]}>
+
+                    <View style={[styles.dateWeather, { backgroundColor: isDark ? "#192634" : "#F8F8F8" }]}>
                         <Weather />
                         <View style={styles.dateContainer}>
                             <View style={styles.dateRow}>
@@ -171,6 +173,8 @@ const styles = StyleSheet.create({
     backgroundImage: {
         width: "100%",
         height: "100%",
+        borderRadius: 14,
+        overflow: "hidden",
     },
     gradientFallback: {
         position: "absolute",
@@ -214,6 +218,7 @@ const styles = StyleSheet.create({
         borderRadius: 99,
         paddingRight: 10,
         // paddingLeft: 2,
+        overflow: "hidden",
         paddingLeft: 10,
         paddingVertical: 2,
     },
