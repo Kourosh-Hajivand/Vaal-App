@@ -132,13 +132,13 @@ export const Clock: React.FC = () => {
                     <AnnouncementList />
 
                     {/* Random snippet */}
-                    {!isLoadingSnippet && randomSnippet && (randomSnippet.body || randomSnippet.text) && (
+                    {/* {!isLoadingSnippet && randomSnippet && (randomSnippet.body || randomSnippet.text) && (
                         <View style={styles.snippetContainer}>
                             <View style={styles.snippetBubble}>
                                 <CustomText fontType="YekanBakh" weight="Regular" size={10} style={styles.snippetText}>
                                     {randomSnippet.body || randomSnippet.text || ""}
                                 </CustomText>
-                                {/* Tail SVG */}
+
                                 <View style={styles.snippetTail}>
                                     <Svg width={9} height={11} viewBox="0 0 9 11" fill="none">
                                         <Path d="M4.91406 5.27637C5.4467 6.84091 6.34858 8.31835 7.83594 9.9209C8.04831 10.15 7.89036 10.5287 7.57812 10.5215C5.48083 10.4707 2.43355 10.1705 0.230469 8.59668C0.169557 8.55309 0.12924 8.49193 0.108398 8.4248H0V0H4.91406V5.27637Z" fill="#FD5C02" />
@@ -146,7 +146,7 @@ export const Clock: React.FC = () => {
                                 </View>
                             </View>
                         </View>
-                    )}
+                    )} */}
                 </View>
 
                 {/* Footer: Contacts */}
@@ -188,8 +188,8 @@ const styles = StyleSheet.create({
     },
     contentContainer: {
         flex: 1,
-        paddingVertical: 24,
-
+        paddingTop: 24,
+        paddingBottom: 12,
         paddingHorizontal: 14,
         justifyContent: "space-between",
     },

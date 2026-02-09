@@ -307,7 +307,7 @@ export const Advertisement: React.FC = () => {
         itemStartTimeRef.current = Date.now();
     }, [currentIndex, readyItems.length, readyItems, currentItem?.id, currentItem?.type]);
 
-    // Track item start time - فقط وقتی ویدیو شروع به پخش کرد
+    // Track item start time - برای ویدیو و عکس
     useEffect(() => {
         // Reset وقتی آیتم عوض شد
         itemStartTimeRef.current = Date.now();
@@ -372,15 +372,15 @@ export const Advertisement: React.FC = () => {
         [currentItem?.id, currentItem?.duration],
     );
 
+    // Get local path for current item
+    const localPath = currentItem ? localPaths.get(currentItem.id.toString()) : null;
+
     // Auto-advance timer for images (video خودش timer داره)
     usePlaylistTimer({
         duration: currentItem?.type === "image" ? currentItem.duration || 10 : 0,
-        enabled: currentItem?.type === "image" && !isPaused && isInitialized,
+        enabled: currentItem?.type === "image" && !isPaused && isInitialized && !!localPath, // فقط وقتی عکس آماده باشه
         onAdvance: advanceToNext,
     });
-
-    // Get local path for current item
-    const localPath = currentItem ? localPaths.get(currentItem.id.toString()) : null;
 
     // وقتی ویدیو جدید لود شد، مطمئن شو که play میشه (اگر نباید pause باشه)
     useEffect(() => {
@@ -449,7 +449,6 @@ export const Advertisement: React.FC = () => {
         );
     }
 
-    // Render video or image
     return (
         <View style={styles.container}>
             {currentItem.type === "video" ? (
@@ -462,7 +461,7 @@ export const Advertisement: React.FC = () => {
                     onProgress={handleVideoProgress}
                 />
             ) : (
-                <ImageDisplay uri={localPath} />
+                <ImageDisplay key={`${currentItem.id}-${currentIndex}`} uri={localPath || ""} />
             )}
 
             {/* Debug Overlay */}

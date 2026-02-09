@@ -1,10 +1,18 @@
 /**
- * Announcement List — iOS Notification Stack
- * Single-phase animation: همه همزمان animate میشن
+ * Announcement List — Stable Dynamic Window (Fixed Logic)
+ *
+ * ✅ NO SCROLL
+ * ✅ فقط کارت‌های کامل (بدون peek زیرشون)
+ * ✅ فاصله عمودی ثابت ۱۰px بین کارت‌ها
+ * ✅ تخمین ارتفاع محافظه‌کار بر اساس طول متن (همیشه کمی بزرگ‌تر از واقعی)
+ * ✅ اگر متن خیلی بلند باشد (مثل پیام ۴)، تنها همان کارت در صفحه نمایش داده می‌شود
+ * ✅ head همیشه به اندازه تعداد کارت‌های همان صفحه جلو می‌رود (بدون overlap / پرش)
+ * ✅ متن تا سقف ارتفاع استک (۴۲۵px) نمایش داده می‌شود
  */
-import React, { useMemo, useState, useEffect, useRef } from "react";
+
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { View, StyleSheet } from "react-native";
-import Animated, { useAnimatedStyle, withTiming, useSharedValue, Layout, Easing, FadeIn, Keyframe } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, withTiming, useSharedValue, Easing, FadeIn, Keyframe } from "react-native-reanimated";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
 import { useDeviceAnnouncements } from "@/src/hooks/announcement/useDeviceAnnouncements";
@@ -12,7 +20,6 @@ import { getIranTime, formatRelativeTime, formatPersianDateShort } from "@/src/u
 import { useOnlineStatus } from "@/src/hooks/use-online-status";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import Svg, { Path, Defs, LinearGradient, Stop, Circle } from "react-native-svg";
-import { BlurView } from "expo-blur";
 
 // ─── Type Config ─────────────────
 const getTypeConfig = (isDark: boolean): Record<string, { bg: string; color: string; icon: string }> => ({
@@ -81,41 +88,147 @@ const AIcon = ({ type, isDark }: { type: string; isDark: boolean }) => {
 };
 
 // ─── Animation Config ────────────
-const DUR = 400;
-const EXIT_DUR = 250; // exit سریع‌تر
-
-// Custom exit: scale down + slide up + fade out (سریع)
-const ExitAnimation = new Keyframe({
-    0: { opacity: 1, transform: [{ scale: 1 }, { translateY: 0 }] },
-    30: { opacity: 0.3, transform: [{ scale: 0.9 }, { translateY: -10 }] },
-    70: { opacity: 0, transform: [{ scale: 0.85 }, { translateY: -25 }] },
-    100: { opacity: 0, transform: [{ scale: 0.85 }, { translateY: -30 }] },
-}).duration(EXIT_DUR);
+const DUR = 420;
+const EXIT_DUR = 240;
 const EASE = Easing.bezier(0.4, 0, 0.2, 1);
 const TIMING = { duration: DUR, easing: EASE };
 
-// slot → scale/opacity برای stacked items
-const SLOT_STYLE = [
-    { scale: 1, opacity: 1 }, // 0 main
-    { scale: 1, opacity: 1 }, // 1 main
-    { scale: 1, opacity: 1 }, // 2 main
-    { scale: 0.97, opacity: 1 }, // 3 stacked 1 — opacity کامل
-    { scale: 0.94, opacity: 1 }, // 4 stacked 2 — opacity کامل
-];
+const ExitAnimation = new Keyframe({
+    0: { opacity: 1, transform: [{ scale: 1 }, { translateY: 0 }] },
+    40: { opacity: 0.35, transform: [{ scale: 0.93 }, { translateY: -10 }] },
+    100: { opacity: 0, transform: [{ scale: 0.88 }, { translateY: -30 }] },
+}).duration(EXIT_DUR);
 
-// ─── Main ────────────────────────
+// ─── Layout Budget ───────────────
+const STACK_HEIGHT = 425; // کل فضای نمایش کارت‌ها
+const MAIN_GAP = 10; // فاصله‌ی بین کارت‌ها
+const MAX_CHARS = 1320;
+
+// ─── Helpers ─────────────────────
+const clamp = (min: number, v: number, max: number) => Math.max(min, Math.min(max, v));
+
+const truncateMessage = (text: string, maxLength: number) => {
+    const t = String(text ?? "");
+    if (!t) return "";
+    if (t.length <= maxLength) return t;
+    return `${t.slice(0, maxLength - 1)}…`;
+};
+
+// مدت زمان خواندن متن
+const estimateReadingMs = (msg: string) => {
+    const text = String(msg ?? "");
+    if (!text) return 0;
+    const chars = text.length;
+    const words = chars / 5;
+    const seconds = words / 3.3;
+    const ms = 2000 + seconds * 1000;
+    return clamp(3500, ms, 14000);
+};
+
+/**
+ * تخمین ارتفاع کارت بر اساس طول متن (محافظه‌کار)
+ * ایده: عمداً کمی بیشتر از واقعیت حساب می‌کنیم تا
+ * هیچ‌وقت آیتم اضافه در همان صفحه نچپونیم که نصفش دیده بشه.
+ */
+const estimateCardHeight = (title: string, message: string): number => {
+    const msg = truncateMessage(String(message ?? ""), MAX_CHARS);
+    const chars = msg.length;
+
+    // هر ~40 کاراکتر ≈ یک خط
+    const charsPerLine = 40;
+    const lineH = 20; // کمی بزرگ‌تر از واقعی برای over-estimate
+    const base = 60; // عنوان + پدینگ‌ها
+
+    const lines = Math.max(1, Math.ceil(chars / charsPerLine));
+    const h = base + lines * lineH;
+
+    // هر کارت نهایتاً به اندازه‌ی کل استک
+    return clamp(70, h, STACK_HEIGHT);
+};
+
+type AnnItem = any & {
+    __y?: number;
+    __maxH?: number;
+    __idx?: number;
+};
+
+// محاسبه‌ی پنجره‌ی قابل نمایش براساس تخمین ارتفاع
+const computeWindow = (filtered: any[], head: number): AnnItem[] => {
+    if (!filtered.length) return [];
+
+    const out: AnnItem[] = [];
+    let usedHeight = 0;
+
+    for (let k = 0; k < filtered.length; k++) {
+        const a = filtered[(head + k) % filtered.length];
+
+        const estH = estimateCardHeight(a.title, a.message);
+        const gap = out.length === 0 ? 0 : MAIN_GAP;
+        const top = out.length === 0 ? 0 : usedHeight + gap;
+        const bottom = top + estH;
+
+        // اگه این کارت جا نشه، تموم — دیگه کارت بعدی نمی‌ذاریم
+        if (bottom > STACK_HEIGHT) {
+            // اگر هیچ کارتی اضافه نشده، حداقل همین رو با max ارتفاع نشون بده
+            if (!out.length) {
+                out.push({
+                    ...a,
+                    __y: 0,
+                    __maxH: STACK_HEIGHT,
+                    __idx: 0,
+                });
+            }
+            break;
+        }
+
+        out.push({
+            ...a,
+            __y: top,
+            __maxH: estH,
+            __idx: out.length,
+        });
+
+        usedHeight = bottom;
+    }
+
+    if (!out.length && filtered.length) {
+        const a = filtered[head];
+        out.push({
+            ...a,
+            __y: 0,
+            __maxH: STACK_HEIGHT,
+            __idx: 0,
+        });
+    }
+
+    return out;
+};
+
+const getVisibleCount = (win: AnnItem[]) => Math.max(1, win.length);
+
+// ─── Main Component ──────────────
 export const AnnouncementList: React.FC = () => {
     const { data: announcements, dataUpdatedAt, isFetching, isRefetching } = useDeviceAnnouncements();
     const { isOnline } = useOnlineStatus();
     const { colors, isDark } = useTheme();
-    const [items, setItems] = useState<any[]>([]);
+
+    const [items, setItems] = useState<AnnItem[]>([]);
+    const headRef = useRef(0);
+
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const clearTimer = useCallback(() => {
+        if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+    }, []);
+
+    // آخرین فچ
     const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
     const lastFetchTimeRef = useRef<number | null>(null);
     const previousIsOnlineRef = useRef<boolean>(true);
     const wasRefetchingRef = useRef<boolean>(false);
-    const headRef = useRef(0);
 
-    // Track last fetch
     useEffect(() => {
         if (!lastFetchTimeRef.current && dataUpdatedAt) {
             setLastFetchTime(dataUpdatedAt);
@@ -131,6 +244,7 @@ export const AnnouncementList: React.FC = () => {
             wasRefetchingRef.current = false;
         }
     }, [dataUpdatedAt, isOnline, isFetching, isRefetching]);
+
     useEffect(() => {
         if (!isOnline && previousIsOnlineRef.current && dataUpdatedAt && (!lastFetchTimeRef.current || dataUpdatedAt > lastFetchTimeRef.current)) {
             setLastFetchTime(dataUpdatedAt);
@@ -159,29 +273,7 @@ export const AnnouncementList: React.FC = () => {
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }, [announcements]);
 
-    const hasStack = filtered.length > 3;
-
-    // Init
-    useEffect(() => {
-        if (!filtered.length) return;
-        setItems(filtered.slice(0, Math.min(hasStack ? 5 : 3, filtered.length)));
-        headRef.current = 0;
-    }, [filtered.length]);
-
-    // ─── Single-phase rotate ─────
-    // فقط یک setItems — Reanimated بقیه رو handle میکنه
-    useEffect(() => {
-        if (filtered.length <= 3) return;
-        const timer = setInterval(() => {
-            headRef.current = (headRef.current + 1) % filtered.length;
-            setItems((prev) => {
-                const [, ...rest] = prev;
-                const tailIdx = (headRef.current + Math.min(4, filtered.length - 1)) % filtered.length;
-                return [...rest, filtered[tailIdx]];
-            });
-        }, 5000);
-        return () => clearInterval(timer);
-    }, [filtered]);
+    const filteredSig = useMemo(() => filtered.map((x) => x.id).join("|"), [filtered]);
 
     // Relative time
     const [tick, setTick] = useState(0);
@@ -189,6 +281,7 @@ export const AnnouncementList: React.FC = () => {
         const t = setInterval(() => setTick((p) => p + 1), 10000);
         return () => clearInterval(t);
     }, []);
+
     const lastUpdate = useMemo(() => {
         if (lastFetchTime) {
             const r = formatRelativeTime(new Date(lastFetchTime).toISOString());
@@ -199,6 +292,52 @@ export const AnnouncementList: React.FC = () => {
         return "به تازگی";
     }, [filtered, dataUpdatedAt, lastFetchTime, isOnline, tick]);
 
+    const computeDurationForWindow = useCallback((win: AnnItem[]) => {
+        const sum = win.reduce((acc, x) => {
+            const msg = truncateMessage(String(x.message ?? ""), MAX_CHARS);
+            return acc + estimateReadingMs(msg);
+        }, 0);
+        const overhead = 800 + win.length * 250;
+        return clamp(4500, sum + overhead, 22000);
+    }, []);
+
+    const scheduleFromWindow = useCallback(
+        (win: AnnItem[]) => {
+            clearTimer();
+            if (filtered.length <= 1) return;
+
+            const dur = computeDurationForWindow(win);
+            const step = getVisibleCount(win);
+
+            timerRef.current = setTimeout(() => {
+                headRef.current = (headRef.current + step) % filtered.length;
+                const next = computeWindow(filtered, headRef.current);
+                setItems(next);
+                scheduleFromWindow(next);
+            }, dur);
+        },
+        [clearTimer, filtered, computeDurationForWindow],
+    );
+
+    // init / restart on data change
+    useEffect(() => {
+        clearTimer();
+
+        if (!filtered.length) {
+            setItems([]);
+            return;
+        }
+
+        headRef.current = 0;
+        const win = computeWindow(filtered, headRef.current);
+        setItems(win);
+        scheduleFromWindow(win);
+
+        return () => clearTimer();
+    }, [filteredSig, clearTimer, scheduleFromWindow]);
+
+    useEffect(() => () => clearTimer(), [clearTimer]);
+
     if (!filtered.length) return null;
 
     return (
@@ -208,10 +347,12 @@ export const AnnouncementList: React.FC = () => {
                 <CustomText fontType="YekanBakh" weight="Regular" size={8} applyThemeColor={false} style={{ color: colors.text, opacity: 0.9 }}>
                     آخرین به‌روزرسانی: {lastUpdate}
                 </CustomText>
+
                 <View style={styles.headerRight}>
                     <CustomText fontType="YekanBakh" weight="Regular" size={13} applyThemeColor={true}>
                         اطلاعیه ها
                     </CustomText>
+
                     <Svg width={20} height={20} viewBox="0 0 15 15" fill="none">
                         <Path d="M11.1526 10.5654V5.57613C11.1526 3.30688 9.31304 1.46729 7.04378 1.46729C4.77453 1.46729 2.93494 3.30688 2.93494 5.57613V10.5654" fill="url(#bellGrad)" />
                         <Path d="M12.0331 10.5654H2.05444" stroke="#FD5C02" strokeWidth="0.621506" strokeLinecap="round" strokeLinejoin="round" />
@@ -227,9 +368,16 @@ export const AnnouncementList: React.FC = () => {
             </View>
 
             {/* Stack */}
-            <View style={styles.stack}>
+            <View
+                style={[
+                    styles.stack,
+                    {
+                        backgroundColor: isDark ? "#0B1721" : "rgba(255,255,255,0)",
+                    },
+                ]}
+            >
                 {items.map((a, i) => (
-                    <StackItem key={a.id} data={a} slot={i} colors={colors} />
+                    <StackItem key={`${a.id}-${a.__idx ?? i}`} data={a} colors={colors} zIndex={100 - i} />
                 ))}
             </View>
         </ThemedView>
@@ -237,83 +385,96 @@ export const AnnouncementList: React.FC = () => {
 };
 
 // ─── Stack Item ──────────────────
-interface StackItemProps {
-    data: any;
-    slot: number;
-    colors: any;
-}
-
-const StackItem: React.FC<StackItemProps> = ({ data, slot, colors }) => {
+const StackItem = React.memo(function StackItem({ data, colors, zIndex }: { data: AnnItem; colors: any; zIndex: number }) {
     const { isDark } = useTheme();
     const typeConfig = getTypeConfig(isDark);
     const cfg = typeConfig[data.type] || typeConfig.info;
-    const isStacked = slot >= 3;
-    const target = SLOT_STYLE[slot] || SLOT_STYLE[4];
-    // Animated scale + opacity
-    const scale = useSharedValue(target.scale);
-    const itemOpacity = useSharedValue(target.opacity);
+
+    const targetY = data.__y ?? 0;
+    const maxH = data.__maxH ?? STACK_HEIGHT;
+
+    const y = useSharedValue(targetY);
+    const o = useSharedValue(1);
 
     useEffect(() => {
-        scale.value = withTiming(target.scale, TIMING);
-        itemOpacity.value = withTiming(target.opacity, TIMING);
-    }, [slot]);
+        y.value = withTiming(targetY, TIMING);
+        o.value = withTiming(1, TIMING);
+    }, [targetY]);
 
-    const innerStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }],
-        opacity: itemOpacity.value,
+    const animStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: y.value }],
+        opacity: o.value,
     }));
 
-    // Margin style بر اساس slot (static — Layout handles transition)
-    const slotMargin = isStacked ? { marginTop: slot === 3 ? -35 : -36, marginHorizontal: slot === 3 ? 8 : 16 } : { marginTop: slot === 0 ? 0 : 8, marginHorizontal: 0 };
+    const msg = truncateMessage(String(data.message ?? ""), MAX_CHARS);
 
     return (
-        // Outer: Layout transition + entering/exiting
-        <Animated.View style={[slotMargin, { zIndex: 10 - slot }]} layout={Layout.duration(DUR).easing(EASE)} exiting={ExitAnimation} entering={FadeIn.duration(DUR)}>
-            {/* Inner: scale + opacity animation */}
-            <Animated.View style={innerStyle}>
-                <View
-                    style={[
-                        styles.card,
-                        {
-                            borderColor: isDark ? "#394753" : colors.border,
-                            backgroundColor: isDark ? "#192634" : "rgba(255,255,255,1)",
-                            overflow: "hidden",
-                        },
-                    ]}
-                >
-                    <View style={styles.row}>
-                        <View style={styles.textArea}>
-                            <View style={styles.titleRow}>
-                                <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
-                                    {formatPersianDateShort(data.created_at)}
-                                </CustomText>
-                                <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
-                                    {data.title}
+        <Animated.View entering={FadeIn.duration(DUR)} exiting={ExitAnimation} style={[styles.absItem, { zIndex }, animStyle]}>
+            <View
+                style={[
+                    styles.card,
+                    {
+                        maxHeight: maxH,
+                        borderColor: isDark ? "#394753" : colors.border,
+                        backgroundColor: isDark ? "#192634" : "rgba(255,255,255,1)",
+                        overflow: "hidden",
+                    },
+                ]}
+            >
+                <View style={styles.row}>
+                    <View style={{ flex: 1, gap: 4, paddingHorizontal: 10 }}>
+                        <View style={{ flexDirection: "row", gap: 10, alignContent: "center", alignItems: "center" }}>
+                            <View style={styles.textArea}>
+                                <View style={styles.titleRow}>
+                                    <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
+                                        {formatPersianDateShort(data.created_at)}
+                                    </CustomText>
+                                    <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
+                                        {data.title}
+                                    </CustomText>
+                                </View>
+                            </View>
+
+                            <View style={[styles.iconCircle, { backgroundColor: cfg.bg }]}>
+                                <AIcon type={data.type} isDark={isDark} />
+                            </View>
+                        </View>
+
+                        {!!msg && (
+                            <View style={{ maxHeight: Math.max(0, maxH - 52), overflow: "hidden" }}>
+                                <CustomText fontType="YekanBakh" weight="Regular" size={11} applyThemeColor={false} style={{ color: colors.text, opacity: 0.85, textAlign: "right", paddingHorizontal: 8 }}>
+                                    {msg}
                                 </CustomText>
                             </View>
-                            {!isStacked && data.message && (
-                                <CustomText fontType="YekanBakh" weight="Regular" size={10} applyThemeColor={false} style={{ color: colors.text, opacity: 0.8, textAlign: "right" }}>
-                                    {data.message}
-                                </CustomText>
-                            )}
-                        </View>
-                        <View style={[styles.iconCircle, { backgroundColor: cfg.bg }]}>
-                            <AIcon type={data.type} isDark={isDark} />
-                        </View>
+                        )}
                     </View>
                 </View>
-            </Animated.View>
+            </View>
         </Animated.View>
     );
-};
+});
 
 // ─── Styles ──────────────────────
 const styles = StyleSheet.create({
-    container: { width: "100%", marginTop: 14, zIndex: 10 },
+    container: { width: "100%", marginTop: 14, zIndex: 10, overflow: "hidden" },
     header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 12 },
     headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
-    stack: { width: "100%", paddingBottom: 8 },
-    card: { borderRadius: 16, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 0.382 },
+
+    stack: {
+        width: "100%",
+        height: STACK_HEIGHT,
+        overflow: "hidden",
+        position: "relative",
+    },
+
+    absItem: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+    },
+
+    card: { borderRadius: 16, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 0.382 },
     row: { flexDirection: "row", alignItems: "flex-start", justifyContent: "flex-end", gap: 10 },
     textArea: { flex: 1, alignItems: "flex-end", gap: 4 },
     titleRow: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
