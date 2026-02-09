@@ -27,10 +27,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     // Reset state when URI changes
     useEffect(() => {
         if (previousUriRef.current !== uri) {
-            console.log("[VideoPlayer] 🔄 URI changed:", {
-                from: previousUriRef.current.substring(previousUriRef.current.length - 20),
-                to: uri.substring(uri.length - 20),
-            });
             previousUriRef.current = uri;
 
             // Reset all state
@@ -51,14 +47,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     const handleEnd = useCallback(() => {
         // Check if URI has changed (prevent old video from calling onEnded)
         if (previousUriRef.current !== uri) {
-            console.log("[VideoPlayer] ⚠️ handleEnd called but URI changed, ignoring");
             return;
         }
-
-        console.log("[VideoPlayer] 🎬 handleEnd:", {
-            elapsed: elapsedBeforePauseRef.current.toFixed(1),
-            duration,
-        });
 
         if (!hasEnded) {
             setHasEnded(true);
@@ -96,13 +86,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
         }
 
         const remainingTime = duration - elapsedBeforePauseRef.current;
-        console.log("[VideoPlayer] ⏰ Timer started:", {
-            duration,
-            remaining: remainingTime.toFixed(1),
-        });
 
         durationTimerRef.current = setTimeout(() => {
-            console.log("[VideoPlayer] ⏰ Timer expired, advancing");
             handleEnd();
         }, remainingTime * 1000);
 
@@ -135,17 +120,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
 
         // اگر ویدیو progress داره و pause نیست، یعنی واقعاً پخش شده
         if (!isPaused && data.currentTime > 0 && !hasStartedPlaying) {
-            console.log("[VideoPlayer] ▶️ Started playing:", data.currentTime.toFixed(1));
             setHasStartedPlaying(true);
             elapsedBeforePauseRef.current = 0;
         }
 
         // ⚠️ CRITICAL: اگر ویدیو به duration رسیده یا ازش گذشته، advance کن
         if (!hasEnded && hasStartedPlaying && !isPaused && data.currentTime >= duration) {
-            console.log("[VideoPlayer] ⏰ Duration reached:", {
-                currentTime: data.currentTime.toFixed(1),
-                duration,
-            });
             handleEnd();
             return;
         }

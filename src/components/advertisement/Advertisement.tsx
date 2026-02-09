@@ -265,24 +265,11 @@ export const Advertisement: React.FC = () => {
 
     // Advance to next item
     const advanceToNext = useCallback(() => {
-        console.log("[Advertisement] 🎬 advanceToNext:", {
-            from: currentIndex,
-            currentItemId: currentItem?.id,
-            readyItems: readyItems.length,
-        });
-
         if (!readyItems.length) {
-            console.log("[Advertisement] ⚠️ No ready items");
             return;
         }
 
         const nextIndex = (currentIndex + 1) % readyItems.length;
-        const nextItem = readyItems[nextIndex];
-
-        console.log("[Advertisement] ✅ Next video:", {
-            to: nextIndex,
-            nextItemId: nextItem?.content?.id,
-        });
 
         setCurrentIndex(nextIndex);
         setVideoProgress(0);
@@ -421,7 +408,7 @@ export const Advertisement: React.FC = () => {
             )}
 
             {/* Debug Overlay */}
-            {/* {__DEV__ && (
+            {__DEV__ && (
                 <View style={styles.debugOverlay}>
                     <Text style={styles.debugText}>
                         📹 {currentItem.title} ({currentIndex + 1}/{readyItems.length})
@@ -452,7 +439,7 @@ export const Advertisement: React.FC = () => {
                     </Text>
                     {(playlist?.items?.length || 0) > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
                 </View>
-            )} */}
+            )}
         </View>
     );
 };
