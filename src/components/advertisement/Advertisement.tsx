@@ -14,7 +14,7 @@ import { cacheManager } from "@/src/utils/cache/cacheManager";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageDisplay } from "./ImageDisplay";
 import { Image } from "expo-image";
-import type { ContentItemResource, PlaylistItemResource } from "@/src/types/api.types";
+import type { ManifestContentItem } from "@/src/types/api.types";
 
 // Extended type با duration محاسبه شده (برای display)
 interface DisplayContentItem {
@@ -55,8 +55,8 @@ export const Advertisement: React.FC = () => {
     const itemStartTimeRef = useRef<number>(0);
     const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    // Extract playlist from manifest
-    const playlist = manifest?.playlist;
+    // منبع محتوا: مستقیم از data.content
+    const contentItems = useMemo<ManifestContentItem[]>(() => manifest?.content ?? [], [manifest?.content]);
 
     // اگر سنسور وصل نیست، همیشه پخش کن (Auto-Play Mode)
     const shouldPlay = !isSensorConnected || isPresence;
@@ -83,36 +83,31 @@ export const Advertisement: React.FC = () => {
     // ========================================================================
 
     useEffect(() => {
-        if (!playlist?.items || !isInitialized) return;
+        if (!contentItems.length || !isInitialized) return;
 
-        const playlistId = playlist.id;
+        const contentKey = manifest?.device_id ?? "content";
 
-        // اگر playlist عوض شد، reset کن
-        if (currentPlaylistIdRef.current !== playlistId) {
-            currentPlaylistIdRef.current = playlistId;
+        // اگر منبع عوض شد، reset کن
+        if (currentPlaylistIdRef.current !== contentKey) {
+            currentPlaylistIdRef.current = contentKey;
             setCurrentIndex(0);
             setLocalPaths(new Map());
             setDownloadStatus(new Map());
         }
-
-        const items = playlist.items;
 
         // بلافاصله cached files رو شناسایی کن
         const loadCachedFiles = async () => {
             const paths = new Map<string, string>();
             const status = new Map<string, "downloading" | "ready" | "error">();
 
-            for (const playlistItem of items) {
-                const content = playlistItem.content;
-                const url = content.file_url;
+            for (const item of contentItems) {
+                const url = item.file_url;
                 const localPath = cacheManager.getCachedPath(url);
 
                 if (localPath) {
-                    // فایل کش شده پیدا شد
-                    paths.set(content.id.toString(), localPath);
+                    paths.set(item.id, localPath);
                     status.set(url, "ready");
                 } else {
-                    // فایل کش نشده، باید دانلود بشه
                     status.set(url, "downloading");
                 }
             }
@@ -120,47 +115,46 @@ export const Advertisement: React.FC = () => {
             setLocalPaths(paths);
             setDownloadStatus(status);
 
-            // اگر هیچ فایلی کش نشده، شروع به دانلود کن
-            const needsDownload = items.filter((item) => !paths.has(item.content.id.toString()));
-
+            const needsDownload = contentItems.filter((item) => !paths.has(item.id));
             if (needsDownload.length > 0) {
                 downloadItemsProgressively(needsDownload);
             }
         };
 
         loadCachedFiles();
-    }, [playlist?.id, playlist?.items, isInitialized]);
+    }, [manifest?.device_id, contentItems, isInitialized]);
 
     // Progressive download: هر ویدیو که دانلود شد، بلافاصله اضافه کن
     // ⚠️ هیچ وقت فایل‌های کش شده رو دوباره دانلود نمی‌کنیم
-    const downloadItemsProgressively = async (items: PlaylistItemResource[]) => {
-        for (const playlistItem of items) {
-            const content = playlistItem.content;
-            const url = content.file_url;
+    const downloadItemsProgressively = async (items: ManifestContentItem[]) => {
+        for (const item of items) {
+            const url = item.file_url;
+            const updatedAt = item.updated_at ?? "0"; // مقدار ثابت تا از re-download مکرر جلوگیری شود
 
             try {
-                // ⛔ CRITICAL: چک کن فایل کش شده یا نه - دوباره دانلود نکن
-                const needsUpdate = cacheManager.needsUpdate(url, content.updated_at);
+                const needsUpdate = cacheManager.needsUpdate(url, updatedAt);
 
                 if (!needsUpdate) {
-                    // فایل کش شده و به‌روز است
                     const cachedPath = cacheManager.getCachedPath(url);
                     if (cachedPath) {
-                        setLocalPaths((prev) => new Map(prev).set(content.id.toString(), cachedPath));
+                        setLocalPaths((prev) => new Map(prev).set(item.id, cachedPath));
                         setDownloadStatus((prev) => new Map(prev).set(url, "ready"));
                     }
                     continue;
                 }
 
-                // فایل جدید است یا کش نشده - دانلود کن
                 setDownloadStatus((prev) => new Map(prev).set(url, "downloading"));
 
-                const localPath = await cacheManager.cacheFile(url, content.type === "video" ? "video" : "image", content.id.toString(), content.updated_at);
+                const localPath = await cacheManager.cacheFile(
+                    url,
+                    item.type === "video" ? "video" : "image",
+                    item.id,
+                    updatedAt,
+                );
 
-                // بلافاصله به state اضافه کن تا قابل نمایش بشه
                 setLocalPaths((prev) => {
                     const newPaths = new Map(prev);
-                    newPaths.set(content.id.toString(), localPath);
+                    newPaths.set(item.id, localPath);
                     return newPaths;
                 });
                 setDownloadStatus((prev) => {
@@ -169,10 +163,8 @@ export const Advertisement: React.FC = () => {
                     return newStatus;
                 });
             } catch (error) {
-                // Track retry count
                 const currentRetries = retryCount.get(url) || 0;
                 setRetryCount((prev) => new Map(prev).set(url, currentRetries + 1));
-
                 setDownloadStatus((prev) => {
                     const newStatus = new Map(prev);
                     newStatus.set(url, "error");
@@ -187,39 +179,36 @@ export const Advertisement: React.FC = () => {
     // ========================================================================
 
     useEffect(() => {
-        if (!playlist?.items || !isOnline) return;
+        if (!contentItems.length || !isOnline) return;
 
-        // Clear existing interval
         if (retryIntervalRef.current) {
             clearInterval(retryIntervalRef.current);
         }
 
         retryIntervalRef.current = setInterval(() => {
-            const items = playlist.items || [];
-            const failedItems: PlaylistItemResource[] = [];
+            const failedItems: ManifestContentItem[] = [];
 
-            for (const playlistItem of items) {
-                const url = playlistItem.content.file_url;
+            for (const item of contentItems) {
+                const url = item.file_url;
                 const status = downloadStatus.get(url);
                 const retries = retryCount.get(url) || 0;
 
-                // اگر error داره و کمتر از 5 بار retry شده
                 if (status === "error" && retries < 5) {
-                    failedItems.push(playlistItem);
+                    failedItems.push(item);
                 }
             }
 
             if (failedItems.length > 0) {
                 downloadItemsProgressively(failedItems);
             }
-        }, 10 * 1000); // هر 10 ثانیه
+        }, 10 * 1000);
 
         return () => {
             if (retryIntervalRef.current) {
                 clearInterval(retryIntervalRef.current);
             }
         };
-    }, [playlist?.id, downloadStatus, retryCount, isOnline]);
+    }, [manifest?.device_id, contentItems, downloadStatus, retryCount, isOnline]);
 
     // ========================================================================
     // 3. AUTO-PLAY: سنسور optional است
@@ -237,29 +226,25 @@ export const Advertisement: React.FC = () => {
 
     // Get ready items (فقط آیتم‌هایی که localPath دارن)
     const readyItems = useMemo(() => {
-        const items = playlist?.items || [];
-        return items.filter((item) => localPaths.has(item.content.id.toString()));
-    }, [playlist?.items, localPaths.size]);
+        return contentItems.filter((item) => localPaths.has(item.id));
+    }, [contentItems, localPaths.size]);
 
     // Get current item from ready items
     const currentItem: DisplayContentItem | null = useMemo(() => {
         if (!readyItems.length) return null;
 
         const safeIndex = Math.min(currentIndex, readyItems.length - 1);
-        const playlistItem = readyItems[safeIndex];
-        if (!playlistItem) return null;
+        const item = readyItems[safeIndex];
+        if (!item) return null;
 
-        const content = playlistItem.content;
-        if (!content) return null;
-
-        // محاسبه duration: اولویت با playlistItem.duration، بعد content.duration_sec
-        const itemDuration = playlistItem.duration || content.duration_sec || 10;
+        const itemDuration = item.duration_sec ?? 10;
 
         return {
-            ...content,
-            media_url: content.file_url,
+            ...item,
+            media_url: item.file_url,
             duration: itemDuration,
-            id: content.id.toString(),
+            duration_sec: item.duration_sec,
+            id: item.id,
         } as DisplayContentItem;
     }, [readyItems, currentIndex]);
 
@@ -345,8 +330,8 @@ export const Advertisement: React.FC = () => {
     // Render States
     // ========================================================================
 
-    // Fallback: هیچ آیتمی در playlist نیست → نمایش عکس fallback
-    if (!isLoading && !playlist?.items?.length) {
+    // Fallback: هیچ آیتمی در content نیست → نمایش عکس fallback
+    if (!isLoading && !contentItems.length) {
         return (
             <View style={styles.fallbackContainer}>
                 <Image source={require("../../../assets/images/fallback-advertisement.png")} style={styles.fallbackImage} contentFit="cover" transition={300} />
@@ -366,7 +351,7 @@ export const Advertisement: React.FC = () => {
 
     // Waiting for first item - نمایش progress
     if (!currentItem || !localPath) {
-        const totalItems = playlist?.items?.length || 0;
+        const totalItems = contentItems.length;
         const readyCount = readyItems.length;
         const percentage = totalItems > 0 ? Math.round((readyCount / totalItems) * 100) : 0;
 
@@ -435,9 +420,9 @@ export const Advertisement: React.FC = () => {
                     {!isSensorConnected && <Text style={styles.debugText}>🎬 Auto-Play Mode</Text>}
                     <View style={styles.separator} />
                     <Text style={styles.debugText}>
-                        📦 Ready: {readyItems.length}/{playlist?.items?.length || 0}
+                        📦 Ready: {readyItems.length}/{contentItems.length}
                     </Text>
-                    {(playlist?.items?.length || 0) > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
+                    {contentItems.length > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
                 </View>
             )}
         </View>

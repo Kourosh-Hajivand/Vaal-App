@@ -244,9 +244,25 @@ export interface Weather {
 
 // ==================== Manifest Types ====================
 
+/** آیتم محتوا در پاسخ manifest (مستقیم از data.content) */
+export interface ManifestContentItem {
+    id: string;
+    title: string;
+    type: string;
+    file_url: string;
+    duration_sec: number;
+    resolution?: string | null;
+    aspect_ratio?: string | null;
+    order_index?: number;
+    priority?: number;
+    updated_at?: string;
+}
+
 export interface ManifestResponse {
     device_id: string;
     layout?: Record<string, unknown> | null;
+    /** لیست محتوا (اولویت نسبت به playlist) */
+    content?: ManifestContentItem[] | null;
     playlist?: PlaylistResource | null;
     weather?: Weather | null;
 }
