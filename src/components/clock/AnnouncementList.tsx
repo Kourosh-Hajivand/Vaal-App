@@ -1,17 +1,18 @@
 /**
- * Announcement List — Stable Dynamic Window (Fixed Logic)
+ * Announcement List — Stable Dynamic Window (NO SCROLL + MAX FILL + NO TEXT CUT)
  *
  * ✅ NO SCROLL
- * ✅ فقط کارت‌های کامل (بدون peek زیرشون)
+ * ✅ تا جای ممکن تعداد کارت‌ها را پر می‌کند (maximize packing)
  * ✅ فاصله عمودی ثابت ۱۰px بین کارت‌ها
- * ✅ تخمین ارتفاع محافظه‌کار بر اساس طول متن (همیشه کمی بزرگ‌تر از واقعی)
- * ✅ اگر متن خیلی بلند باشد (مثل پیام ۴)، تنها همان کارت در صفحه نمایش داده می‌شود
- * ✅ head همیشه به اندازه تعداد کارت‌های همان صفحه جلو می‌رود (بدون overlap / پرش)
- * ✅ متن تا سقف ارتفاع استک (۴۲۵px) نمایش داده می‌شود
+ * ✅ اگر متن خیلی بلند باشد → همان پیام به چند «صفحه» تقسیم می‌شود (Page 1/3, 2/3, ...)
+ * ✅ هیچ متنی truncate نمی‌شود
+ * ✅ زمان چرخش بر اساس حجم متن هر «صفحه» محاسبه می‌شود (+ احترام به duration_sec)
+ * ✅ head به اندازه تعداد کارت‌های همان window جلو می‌رود (بدون overlap / پرش)
+ * ✅ تصمیم‌گیری نمایش تعداد کارت‌ها بر اساس HEIGHT واقعی کارت‌هاست (نه تخمین)
  */
 
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, LayoutChangeEvent } from "react-native";
 import Animated, { useAnimatedStyle, withTiming, useSharedValue, Easing, FadeIn, Keyframe } from "react-native-reanimated";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
@@ -42,6 +43,7 @@ const SuccessIcon = ({ c }: { c: string }) => (
         />
     </Svg>
 );
+
 const InfoIcon = ({ c }: { c: string }) => (
     <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
         <Path
@@ -52,6 +54,7 @@ const InfoIcon = ({ c }: { c: string }) => (
         />
     </Svg>
 );
+
 const WarningIcon = ({ c }: { c: string }) => (
     <Svg width={14} height={14} viewBox="0 0 12 11" fill="none">
         <Path
@@ -65,6 +68,7 @@ const WarningIcon = ({ c }: { c: string }) => (
         <Path d="M5.59119 7.83887V7.84702" stroke={c} strokeWidth="0.936128" strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
 );
+
 const UrgentIcon = ({ c }: { c: string }) => (
     <Svg width={16} height={16} viewBox="0 0 14 14" fill="none">
         <Circle cx="7" cy="7" r="6" stroke={c} strokeWidth="1.2" />
@@ -100,109 +104,40 @@ const ExitAnimation = new Keyframe({
 }).duration(EXIT_DUR);
 
 // ─── Layout Budget ───────────────
-const STACK_HEIGHT = 425; // کل فضای نمایش کارت‌ها
-const MAIN_GAP = 10; // فاصله‌ی بین کارت‌ها
-const MAX_CHARS = 1320;
+const STACK_HEIGHT = 465;
+const MAIN_GAP = 10;
 
-// ─── Helpers ─────────────────────
+// fallback ها تا وقتی measure انجام نشده
+const FALLBACK_CHROME_H = 52;
+const FALLBACK_LINE_H = 20;
+
 const clamp = (min: number, v: number, max: number) => Math.max(min, Math.min(max, v));
 
-const truncateMessage = (text: string, maxLength: number) => {
-    const t = String(text ?? "");
-    if (!t) return "";
-    if (t.length <= maxLength) return t;
-    return `${t.slice(0, maxLength - 1)}…`;
-};
+const estimateReadingMs = (msg: string, durationSec?: number) => {
+    const base = durationSec ? durationSec * 1000 : 0;
+    const text = String(msg ?? "").trim();
+    if (!text) return clamp(2500, base || 0, 16000);
 
-// مدت زمان خواندن متن
-const estimateReadingMs = (msg: string) => {
-    const text = String(msg ?? "");
-    if (!text) return 0;
-    const chars = text.length;
-    const words = chars / 5;
+    const words = text.length / 5;
     const seconds = words / 3.3;
-    const ms = 2000 + seconds * 1000;
-    return clamp(3500, ms, 14000);
-};
+    const autoMs = 1800 + seconds * 1000;
 
-/**
- * تخمین ارتفاع کارت بر اساس طول متن (محافظه‌کار)
- * ایده: عمداً کمی بیشتر از واقعیت حساب می‌کنیم تا
- * هیچ‌وقت آیتم اضافه در همان صفحه نچپونیم که نصفش دیده بشه.
- */
-const estimateCardHeight = (title: string, message: string): number => {
-    const msg = truncateMessage(String(message ?? ""), MAX_CHARS);
-    const chars = msg.length;
-
-    // هر ~40 کاراکتر ≈ یک خط
-    const charsPerLine = 40;
-    const lineH = 20; // کمی بزرگ‌تر از واقعی برای over-estimate
-    const base = 60; // عنوان + پدینگ‌ها
-
-    const lines = Math.max(1, Math.ceil(chars / charsPerLine));
-    const h = base + lines * lineH;
-
-    // هر کارت نهایتاً به اندازه‌ی کل استک
-    return clamp(70, h, STACK_HEIGHT);
+    return clamp(3500, Math.max(base, autoMs), 16000);
 };
 
 type AnnItem = any & {
     __y?: number;
     __maxH?: number;
     __idx?: number;
+
+    __page?: number;
+    __pages?: number;
+
+    __wKey?: string; // unique key per virtual page
 };
 
-// محاسبه‌ی پنجره‌ی قابل نمایش براساس تخمین ارتفاع
-const computeWindow = (filtered: any[], head: number): AnnItem[] => {
-    if (!filtered.length) return [];
-
-    const out: AnnItem[] = [];
-    let usedHeight = 0;
-
-    for (let k = 0; k < filtered.length; k++) {
-        const a = filtered[(head + k) % filtered.length];
-
-        const estH = estimateCardHeight(a.title, a.message);
-        const gap = out.length === 0 ? 0 : MAIN_GAP;
-        const top = out.length === 0 ? 0 : usedHeight + gap;
-        const bottom = top + estH;
-
-        // اگه این کارت جا نشه، تموم — دیگه کارت بعدی نمی‌ذاریم
-        if (bottom > STACK_HEIGHT) {
-            // اگر هیچ کارتی اضافه نشده، حداقل همین رو با max ارتفاع نشون بده
-            if (!out.length) {
-                out.push({
-                    ...a,
-                    __y: 0,
-                    __maxH: STACK_HEIGHT,
-                    __idx: 0,
-                });
-            }
-            break;
-        }
-
-        out.push({
-            ...a,
-            __y: top,
-            __maxH: estH,
-            __idx: out.length,
-        });
-
-        usedHeight = bottom;
-    }
-
-    if (!out.length && filtered.length) {
-        const a = filtered[head];
-        out.push({
-            ...a,
-            __y: 0,
-            __maxH: STACK_HEIGHT,
-            __idx: 0,
-        });
-    }
-
-    return out;
-};
+type TextMeasureMap = Record<string, { lines: string[]; measuredAt: number }>;
+type HeightMap = Record<string, { h: number; measuredAt: number }>;
 
 const getVisibleCount = (win: AnnItem[]) => Math.max(1, win.length);
 
@@ -210,10 +145,20 @@ const getVisibleCount = (win: AnnItem[]) => Math.max(1, win.length);
 export const AnnouncementList: React.FC = () => {
     const { data: announcements, dataUpdatedAt, isFetching, isRefetching } = useDeviceAnnouncements();
     const { isOnline } = useOnlineStatus();
-    const { colors, isDark } = useTheme();
+    const { colors } = useTheme();
 
     const [items, setItems] = useState<AnnItem[]>([]);
     const headRef = useRef(0);
+
+    // stack width برای wrap دقیق
+    const [stackW, setStackW] = useState(0);
+
+    // chromeHeight واقعی + lineHeight واقعی
+    const [chromeH, setChromeH] = useState(FALLBACK_CHROME_H);
+    const chromeHRef = useRef(FALLBACK_CHROME_H);
+
+    const [lineH, setLineH] = useState(FALLBACK_LINE_H);
+    const lineHRef = useRef(FALLBACK_LINE_H);
 
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const clearTimer = useCallback(() => {
@@ -223,7 +168,7 @@ export const AnnouncementList: React.FC = () => {
         }
     }, []);
 
-    // آخرین فچ
+    // ─── آخرین فچ ──────────────────
     const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
     const lastFetchTimeRef = useRef<number | null>(null);
     const previousIsOnlineRef = useRef<boolean>(true);
@@ -253,7 +198,7 @@ export const AnnouncementList: React.FC = () => {
         previousIsOnlineRef.current = isOnline;
     }, [isOnline, dataUpdatedAt]);
 
-    // Filter
+    // ─── Filter ────────────────────
     const filtered = useMemo(() => {
         if (!announcements?.length) return [];
         const now = getIranTime();
@@ -273,9 +218,160 @@ export const AnnouncementList: React.FC = () => {
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }, [announcements]);
 
-    const filteredSig = useMemo(() => filtered.map((x) => x.id).join("|"), [filtered]);
+    // ─── Text measurement (lines per full message) ───────────────
+    const [textMeasureVersion, setTextMeasureVersion] = useState(0);
+    const textMapRef = useRef<TextMeasureMap>({});
+    const [, setTextMapState] = useState<TextMeasureMap>({}); // فقط برای re-render
 
-    // Relative time
+    const bumpTextMeasure = useCallback(() => setTextMeasureVersion((x) => x + 1), []);
+
+    const onMeasuredLines = useCallback(
+        (id: string, lines: string[], maybeLineH?: number) => {
+            if (!id) return;
+            if (!lines?.length) return;
+
+            const prev = textMapRef.current[id]?.lines;
+            if (!prev || prev.length !== lines.length) {
+                const next = {
+                    ...textMapRef.current,
+                    [id]: { lines, measuredAt: Date.now() },
+                };
+                textMapRef.current = next;
+                setTextMapState(next);
+                bumpTextMeasure();
+            }
+
+            if (maybeLineH && maybeLineH > 8) {
+                const lh = Math.ceil(maybeLineH);
+                if (Math.abs(lh - lineHRef.current) >= 1) {
+                    lineHRef.current = lh;
+                    setLineH(lh);
+                }
+            }
+        },
+        [bumpTextMeasure],
+    );
+
+    const onMeasuredChrome = useCallback((h: number) => {
+        const hh = Math.max(0, Math.ceil(h));
+        if (!hh) return;
+        if (Math.abs(hh - chromeHRef.current) < 2) return;
+        chromeHRef.current = hh;
+        setChromeH(hh);
+    }, []);
+
+    const TEXT_MAX_HEIGHT = Math.max(0, STACK_HEIGHT - chromeH);
+    const MAX_LINES_PER_CARD = Math.max(1, Math.floor(TEXT_MAX_HEIGHT / (lineH || FALLBACK_LINE_H)));
+
+    // ─── Build virtual items (split into pages) ──────────────────
+    const virtualItems = useMemo<AnnItem[]>(() => {
+        if (!filtered.length) return [];
+        if (!stackW) return [];
+
+        const out: AnnItem[] = [];
+
+        for (const a of filtered) {
+            const key = a.id;
+            const lines = textMapRef.current[key]?.lines;
+
+            // هنوز اندازه‌گیری نشده → موقتاً یک صفحه (ولی همزمان measurer اجرا میشه)
+            if (!lines || !lines.length) {
+                out.push({
+                    ...a,
+                    __page: 1,
+                    __pages: 1,
+                    __wKey: `${a.id}:u`,
+                });
+                continue;
+            }
+
+            const pages = Math.max(1, Math.ceil(lines.length / MAX_LINES_PER_CARD));
+            for (let p = 0; p < pages; p++) {
+                const start = p * MAX_LINES_PER_CARD;
+                const end = start + MAX_LINES_PER_CARD;
+                const chunkText = lines.slice(start, end).join("");
+
+                out.push({
+                    ...a,
+                    message: chunkText,
+                    __page: p + 1,
+                    __pages: pages,
+                    __wKey: `${a.id}:p${p + 1}/${pages}`,
+                });
+            }
+        }
+
+        return out;
+    }, [filtered, stackW, textMeasureVersion, MAX_LINES_PER_CARD]);
+
+    // ─── Measure HEIGHT واقعی هر virtual card (کل کارت با همین متن) ─────────
+    const [heightVersion, setHeightVersion] = useState(0);
+    const heightMapRef = useRef<HeightMap>({});
+    const [, setHeightMapState] = useState<HeightMap>({}); // فقط برای re-render
+
+    const onMeasuredCardHeight = useCallback((wKey: string, h: number) => {
+        if (!wKey) return;
+        const hh = Math.max(0, Math.ceil(h));
+        if (!hh) return;
+
+        const prev = heightMapRef.current[wKey]?.h;
+        // جلوگیری از re-render های ریز
+        if (prev && Math.abs(prev - hh) < 2) return;
+
+        const next = {
+            ...heightMapRef.current,
+            [wKey]: { h: hh, measuredAt: Date.now() },
+        };
+        heightMapRef.current = next;
+        setHeightMapState(next);
+        setHeightVersion((x) => x + 1);
+    }, []);
+
+    // ─── computeWindow بر اساس HEIGHT واقعی (maximize fill) ───────
+    const computeWindow = useCallback((arr: AnnItem[], head: number): AnnItem[] => {
+        if (!arr.length) return [];
+
+        const out: AnnItem[] = [];
+        let used = 0;
+
+        for (let k = 0; k < arr.length; k++) {
+            const a = arr[(head + k) % arr.length];
+
+            const key = a.__wKey ?? `${a.id}:${k}`;
+            // ✅ height واقعی اگر موجود بود، وگرنه fallback کوچک/کم‌محافظه‌کار
+            const measuredH = heightMapRef.current[key]?.h;
+            const h = clamp(70, measuredH ?? 120, STACK_HEIGHT);
+
+            const gap = out.length === 0 ? 0 : MAIN_GAP;
+            const top = out.length === 0 ? 0 : used + gap;
+            const bottom = top + h;
+
+            if (bottom > STACK_HEIGHT) {
+                if (!out.length) {
+                    // اگر حتی خودش جا نشد (نباید با paging رخ بده)، یک‌تایی نمایش بده
+                    out.push({ ...a, __y: 0, __maxH: STACK_HEIGHT, __idx: 0 });
+                }
+                break;
+            }
+
+            out.push({ ...a, __y: top, __maxH: h, __idx: out.length });
+            used = bottom;
+        }
+
+        if (!out.length && arr.length) {
+            out.push({ ...arr[head], __y: 0, __maxH: STACK_HEIGHT, __idx: 0 });
+        }
+
+        return out;
+    }, []);
+
+    // ─── signatures برای restart صحیح ───────────────────────────
+    const virtualSig = useMemo(() => {
+        // وقتی heightVersion هم تغییر کند، packing بهتر می‌شود → scheduler refresh
+        return virtualItems.map((x) => `${x.id}:${x.__wKey ?? ""}:${x.created_at ?? ""}`).join("|") + `::h${heightVersion}::c${chromeH}::l${lineH}`;
+    }, [virtualItems, heightVersion, chromeH, lineH]);
+
+    // ─── Relative time tick ─────────
     const [tick, setTick] = useState(0);
     useEffect(() => {
         const t = setInterval(() => setTick((p) => p + 1), 10000);
@@ -293,50 +389,53 @@ export const AnnouncementList: React.FC = () => {
     }, [filtered, dataUpdatedAt, lastFetchTime, isOnline, tick]);
 
     const computeDurationForWindow = useCallback((win: AnnItem[]) => {
-        const sum = win.reduce((acc, x) => {
-            const msg = truncateMessage(String(x.message ?? ""), MAX_CHARS);
-            return acc + estimateReadingMs(msg);
-        }, 0);
-        const overhead = 800 + win.length * 250;
-        return clamp(4500, sum + overhead, 22000);
+        const sum = win.reduce((acc, x) => acc + estimateReadingMs(String(x.message ?? ""), x.duration_sec), 0);
+        const overhead = 700 + win.length * 220;
+        return clamp(4200, sum + overhead, 24000);
     }, []);
 
-    const scheduleFromWindow = useCallback(
-        (win: AnnItem[]) => {
+    // ─── Scheduler ─────────────────
+    const showWindowAndScheduleNext = useCallback(
+        (startHead: number) => {
             clearTimer();
-            if (filtered.length <= 1) return;
 
-            const dur = computeDurationForWindow(win);
+            if (!virtualItems.length) {
+                setItems([]);
+                return;
+            }
+
+            headRef.current = ((startHead % virtualItems.length) + virtualItems.length) % virtualItems.length;
+
+            const win = computeWindow(virtualItems, headRef.current);
+            setItems(win);
+
+            if (virtualItems.length <= 1) return;
+
             const step = getVisibleCount(win);
+            const dur = computeDurationForWindow(win);
 
             timerRef.current = setTimeout(() => {
-                headRef.current = (headRef.current + step) % filtered.length;
-                const next = computeWindow(filtered, headRef.current);
-                setItems(next);
-                scheduleFromWindow(next);
+                const nextHead = (headRef.current + step) % virtualItems.length;
+                showWindowAndScheduleNext(nextHead);
             }, dur);
         },
-        [clearTimer, filtered, computeDurationForWindow],
+        [virtualItems, clearTimer, computeWindow, computeDurationForWindow],
     );
 
-    // init / restart on data change
     useEffect(() => {
-        clearTimer();
-
-        if (!filtered.length) {
-            setItems([]);
-            return;
-        }
-
-        headRef.current = 0;
-        const win = computeWindow(filtered, headRef.current);
-        setItems(win);
-        scheduleFromWindow(win);
-
+        showWindowAndScheduleNext(0);
         return () => clearTimer();
-    }, [filteredSig, clearTimer, scheduleFromWindow]);
+    }, [virtualSig, showWindowAndScheduleNext, clearTimer]);
 
     useEffect(() => () => clearTimer(), [clearTimer]);
+
+    const onStackLayout = useCallback(
+        (e: LayoutChangeEvent) => {
+            const w = Math.floor(e.nativeEvent.layout.width);
+            if (w && w !== stackW) setStackW(w);
+        },
+        [stackW],
+    );
 
     if (!filtered.length) return null;
 
@@ -367,25 +466,168 @@ export const AnnouncementList: React.FC = () => {
                 </View>
             </View>
 
+            {/* OFFSCREEN MEASURERS */}
+            {!!stackW && (
+                <View pointerEvents="none" style={[styles.measurerWrap, { width: stackW }]}>
+                    {/* Chrome height measurer (یک بار) */}
+                    <View style={[styles.card, { borderWidth: 0 }]} onLayout={(e) => onMeasuredChrome(e.nativeEvent.layout.height)}>
+                        <View style={styles.row}>
+                            <View style={{ flex: 1, gap: 4, paddingHorizontal: 10 }}>
+                                <View style={{ flexDirection: "row", gap: 10, alignContent: "center", alignItems: "center" }}>
+                                    <View style={styles.textArea}>
+                                        <View style={styles.titleRow}>
+                                            <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ opacity: 0 }}>
+                                                ۱۴۰۴/۰۱/۰۱
+                                            </CustomText>
+                                            <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ opacity: 0 }}>
+                                                عنوان تست
+                                            </CustomText>
+                                        </View>
+                                    </View>
+                                    <View style={{ width: 24, height: 24, opacity: 0 }} />
+                                </View>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Measure full-message lines (برای page بندی) */}
+                    {filtered.map((a) => {
+                        const key = a.id;
+                        const already = !!textMapRef.current[key]?.lines?.length;
+                        if (already) return null;
+
+                        return (
+                            <View key={`t-${key}`} style={[styles.card, { borderWidth: 0 }]}>
+                                <View style={styles.row}>
+                                    <View style={{ flex: 1, gap: 4, paddingHorizontal: 10 }}>
+                                        <View style={{ flexDirection: "row", gap: 10, alignContent: "center", alignItems: "center" }}>
+                                            <View style={styles.textArea}>
+                                                <View style={styles.titleRow}>
+                                                    <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ opacity: 0 }}>
+                                                        {formatPersianDateShort(a.created_at)}
+                                                    </CustomText>
+                                                    <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ opacity: 0 }}>
+                                                        {a.title}
+                                                    </CustomText>
+                                                </View>
+                                            </View>
+                                            <View style={{ width: 24, height: 24, opacity: 0 }} />
+                                        </View>
+
+                                        <CustomText
+                                            fontType="YekanBakh"
+                                            weight="Regular"
+                                            size={11}
+                                            applyThemeColor={false}
+                                            style={{ opacity: 0, textAlign: "right", paddingHorizontal: 8 }}
+                                            onTextLayout={(e) => {
+                                                const lines = e.nativeEvent.lines?.map((l) => l.text) ?? [];
+                                                const lh = e.nativeEvent.lines?.[0]?.height;
+                                                onMeasuredLines(key, lines, lh);
+                                            }}
+                                        >
+                                            {String(a.message ?? "")}
+                                        </CustomText>
+                                    </View>
+                                </View>
+                            </View>
+                        );
+                    })}
+
+                    {/* Measure REAL HEIGHT for each virtual card/page (برای packing دقیق) */}
+                    {virtualItems.map((v) => {
+                        const wKey = v.__wKey!;
+                        if (!wKey) return null;
+
+                        const already = !!heightMapRef.current[wKey]?.h;
+                        if (already) return null;
+
+                        return <MeasureCard key={`h-${wKey}`} data={v} stackW={stackW} onMeasured={(h) => onMeasuredCardHeight(wKey, h)} chromeH={chromeH} />;
+                    })}
+                </View>
+            )}
+
             {/* Stack */}
-            <View
-                style={[
-                    styles.stack,
-                    {
-                        backgroundColor: isDark ? "#0B1721" : "rgba(255,255,255,0)",
-                    },
-                ]}
-            >
+            <View style={styles.stack} onLayout={onStackLayout}>
                 {items.map((a, i) => (
-                    <StackItem key={`${a.id}-${a.__idx ?? i}`} data={a} colors={colors} zIndex={100 - i} />
+                    <StackItem key={`${a.id}-${a.__wKey ?? a.__idx ?? i}`} data={a} colors={colors} zIndex={100 - i} chromeH={chromeH} />
                 ))}
             </View>
         </ThemedView>
     );
 };
 
+// ─── Offscreen Card Measurer (REAL HEIGHT) ───────────────────────
+const MeasureCard = React.memo(function MeasureCard({ data, onMeasured, chromeH }: { data: AnnItem; stackW: number; onMeasured: (h: number) => void; chromeH: number }) {
+    const { colors, isDark } = useTheme();
+    const typeConfig = getTypeConfig(isDark);
+    const cfg = typeConfig[data.type] || typeConfig.info;
+
+    const msg = String(data.message ?? "");
+
+    return (
+        <View
+            style={[
+                styles.absMeasure,
+                {
+                    width: "100%",
+                },
+            ]}
+            onLayout={(e) => onMeasured(e.nativeEvent.layout.height)}
+        >
+            <View
+                style={[
+                    styles.card,
+                    {
+                        borderColor: isDark ? "#394753" : colors.border,
+                        backgroundColor: isDark ? "#192634" : "rgba(255,255,255,1)",
+                        overflow: "hidden",
+                    },
+                ]}
+            >
+                <View style={styles.row}>
+                    <View style={{ flex: 1, gap: 4, paddingHorizontal: 10 }}>
+                        <View style={{ flexDirection: "row", gap: 10, alignContent: "center", alignItems: "center" }}>
+                            <View style={styles.textArea}>
+                                <View style={styles.titleRow}>
+                                    <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
+                                        {formatPersianDateShort(data.created_at)}
+                                    </CustomText>
+
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                        {data.__pages && data.__pages > 1 && (
+                                            <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.55 }}>
+                                                {data.__page}/{data.__pages}
+                                            </CustomText>
+                                        )}
+                                        <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
+                                            {data.title}
+                                        </CustomText>
+                                    </View>
+                                </View>
+                            </View>
+
+                            <View style={[styles.iconCircle, { backgroundColor: cfg.bg }]}>
+                                <AIcon type={data.type} isDark={isDark} />
+                            </View>
+                        </View>
+
+                        {!!msg && (
+                            <View style={{ maxHeight: Math.max(0, STACK_HEIGHT - chromeH) }}>
+                                <CustomText fontType="YekanBakh" weight="Regular" size={11} applyThemeColor={false} style={{ color: colors.text, opacity: 0.85, textAlign: "right", paddingHorizontal: 8 }}>
+                                    {msg}
+                                </CustomText>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </View>
+        </View>
+    );
+});
+
 // ─── Stack Item ──────────────────
-const StackItem = React.memo(function StackItem({ data, colors, zIndex }: { data: AnnItem; colors: any; zIndex: number }) {
+const StackItem = React.memo(function StackItem({ data, colors, zIndex, chromeH }: { data: AnnItem; colors: any; zIndex: number; chromeH: number }) {
     const { isDark } = useTheme();
     const typeConfig = getTypeConfig(isDark);
     const cfg = typeConfig[data.type] || typeConfig.info;
@@ -406,7 +648,7 @@ const StackItem = React.memo(function StackItem({ data, colors, zIndex }: { data
         opacity: o.value,
     }));
 
-    const msg = truncateMessage(String(data.message ?? ""), MAX_CHARS);
+    const msg = String(data.message ?? "");
 
     return (
         <Animated.View entering={FadeIn.duration(DUR)} exiting={ExitAnimation} style={[styles.absItem, { zIndex }, animStyle]}>
@@ -429,9 +671,17 @@ const StackItem = React.memo(function StackItem({ data, colors, zIndex }: { data
                                     <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.5 }}>
                                         {formatPersianDateShort(data.created_at)}
                                     </CustomText>
-                                    <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
-                                        {data.title}
-                                    </CustomText>
+
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                        {data.__pages && data.__pages > 1 && (
+                                            <CustomText fontType="YekanBakh" weight="Regular" size={9} applyThemeColor={false} style={{ color: colors.text, opacity: 0.55 }}>
+                                                {data.__page}/{data.__pages}
+                                            </CustomText>
+                                        )}
+                                        <CustomText fontType="YekanBakh" weight="SemiBold" size={12} applyThemeColor={false} style={{ color: colors.text }}>
+                                            {data.title}
+                                        </CustomText>
+                                    </View>
                                 </View>
                             </View>
 
@@ -441,7 +691,7 @@ const StackItem = React.memo(function StackItem({ data, colors, zIndex }: { data
                         </View>
 
                         {!!msg && (
-                            <View style={{ maxHeight: Math.max(0, maxH - 52), overflow: "hidden" }}>
+                            <View style={{ maxHeight: Math.max(0, maxH - chromeH) }}>
                                 <CustomText fontType="YekanBakh" weight="Regular" size={11} applyThemeColor={false} style={{ color: colors.text, opacity: 0.85, textAlign: "right", paddingHorizontal: 8 }}>
                                     {msg}
                                 </CustomText>
@@ -479,4 +729,16 @@ const styles = StyleSheet.create({
     textArea: { flex: 1, alignItems: "flex-end", gap: 4 },
     titleRow: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     iconCircle: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+
+    measurerWrap: {
+        position: "absolute",
+        left: -9999,
+        top: -9999,
+        opacity: 0,
+    },
+
+    // برای اندازه‌گیری کارت‌ها: absolute داخل measurerWrap
+    absMeasure: {
+        position: "relative",
+    },
 });
