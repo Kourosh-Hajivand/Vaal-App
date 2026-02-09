@@ -8,7 +8,7 @@
     "scheme": "vaal",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "runtimeVersion": "1.0.1",
+    "runtimeVersion": "1.0.0",
     "updates": {
       "enabled": true,
       "url": "https://u.expo.dev/e88a7f52-0289-409e-a4db-73463edd8c6b",

@@ -15,7 +15,7 @@ interface EmergencyProps {
 export const Emergency: React.FC<EmergencyProps> = ({ emergencyText = "حالت اضطراری", textColor = "#FFFFFF", bgColor = "#DC2626" }) => {
     return (
         <View style={[styles.container, { backgroundColor: bgColor }]}>
-            <CustomText fontType="YekanBakh" weight="Bold" size={48} style={{ color: textColor, textAlign: "center" }}>
+            <CustomText fontType="YekanBakh" weight="SemiBold" size={34} style={{ color: textColor, textAlign: "center" }}>
                 {emergencyText}
             </CustomText>
         </View>
@@ -25,6 +25,7 @@ export const Emergency: React.FC<EmergencyProps> = ({ emergencyText = "حالت 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        paddingHorizontal: 20,
         borderRadius: 14,
         justifyContent: "center",
         alignItems: "center",
