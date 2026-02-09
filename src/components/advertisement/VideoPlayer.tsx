@@ -2,7 +2,7 @@
  * Video Player Component
  * با custom duration control - ویدیو بعد از duration مشخص شده متوقف میشه
  */
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { View, StyleSheet } from "react-native";
 import Video, { type VideoRef } from "react-native-video";
 
@@ -18,46 +18,72 @@ interface VideoPlayerProps {
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded, isPaused, onError, onProgress }) => {
     const videoRef = useRef<VideoRef>(null);
     const [hasEnded, setHasEnded] = useState(false);
-    const [hasStartedPlaying, setHasStartedPlaying] = useState(false); // آیا ویدیو واقعاً شروع به پخش کرده؟
+    const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
     const durationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pausedAtRef = useRef<number>(0);
     const elapsedBeforePauseRef = useRef<number>(0);
+    const previousUriRef = useRef<string>("");
 
+    // Reset state when URI changes
     useEffect(() => {
-        // Reset ended state when URI changes
-        setHasEnded(false);
-        setHasStartedPlaying(false); // Reset playing state
-        elapsedBeforePauseRef.current = 0;
-        pausedAtRef.current = 0;
+        if (previousUriRef.current !== uri) {
+            console.log("[VideoPlayer] 🔄 URI changed:", {
+                from: previousUriRef.current.substring(previousUriRef.current.length - 20),
+                to: uri.substring(uri.length - 20),
+            });
+            previousUriRef.current = uri;
+
+            // Reset all state
+            setHasEnded(false);
+            setHasStartedPlaying(false);
+            elapsedBeforePauseRef.current = 0;
+            pausedAtRef.current = 0;
+
+            // Clear any existing timers
+            if (durationTimerRef.current) {
+                clearTimeout(durationTimerRef.current);
+                durationTimerRef.current = null;
+            }
+        }
     }, [uri]);
 
-    // ⏰ Custom duration timer: بعد از duration مشخص شده، force advance
-    // ⚠️ CRITICAL: فقط وقتی timer رو شروع کن که ویدیو واقعاً شروع به پخش کرده باشه
-    useEffect(() => {
-        console.log("[VideoPlayer] Duration timer effect:", {
-            hasEnded,
+    // Handle end callback - must be defined before useEffect that uses it
+    const handleEnd = useCallback(() => {
+        // Check if URI has changed (prevent old video from calling onEnded)
+        if (previousUriRef.current !== uri) {
+            console.log("[VideoPlayer] ⚠️ handleEnd called but URI changed, ignoring");
+            return;
+        }
+
+        console.log("[VideoPlayer] 🎬 handleEnd:", {
+            elapsed: elapsedBeforePauseRef.current.toFixed(1),
             duration,
-            hasStartedPlaying,
-            isPaused,
-            elapsedBeforePause: elapsedBeforePauseRef.current,
         });
 
+        if (!hasEnded) {
+            setHasEnded(true);
+            if (durationTimerRef.current) {
+                clearTimeout(durationTimerRef.current);
+                durationTimerRef.current = null;
+            }
+            onEnded();
+        }
+    }, [uri, onEnded, hasEnded]);
+
+    // ⏰ Custom duration timer: بعد از duration مشخص شده، force advance
+    useEffect(() => {
         // Clear existing timer
         if (durationTimerRef.current) {
-            console.log("[VideoPlayer] Clearing existing timer");
             clearTimeout(durationTimerRef.current);
             durationTimerRef.current = null;
         }
 
         // اگر ended شده یا duration نداریم یا هنوز پخش نشده، timer نزن
         if (hasEnded || duration <= 0 || !hasStartedPlaying) {
-            console.log("[VideoPlayer] Skipping timer:", { hasEnded, duration, hasStartedPlaying });
             return;
         }
 
         if (isPaused) {
-            console.log("[VideoPlayer] Video is paused, not starting timer");
-            // وقتی pause میشه، وقت سپری شده رو ذخیره کن
             if (pausedAtRef.current === 0) {
                 pausedAtRef.current = Date.now();
             }
@@ -70,15 +96,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
         }
 
         const remainingTime = duration - elapsedBeforePauseRef.current;
-        console.log("[VideoPlayer] Starting duration timer:", {
+        console.log("[VideoPlayer] ⏰ Timer started:", {
             duration,
-            elapsedBeforePause: elapsedBeforePauseRef.current,
-            remainingTime,
-            timeoutMs: remainingTime * 1000,
+            remaining: remainingTime.toFixed(1),
         });
 
         durationTimerRef.current = setTimeout(() => {
-            console.log("[VideoPlayer] Duration timer expired, calling handleEnd");
+            console.log("[VideoPlayer] ⏰ Timer expired, advancing");
             handleEnd();
         }, remainingTime * 1000);
 
@@ -86,112 +110,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
         const trackingInterval = setInterval(() => {
             if (!isPaused && hasStartedPlaying) {
                 elapsedBeforePauseRef.current += 0.1;
-                console.log("[VideoPlayer] Elapsed time:", elapsedBeforePauseRef.current.toFixed(1), "s");
             }
         }, 100);
 
         return () => {
-            console.log("[VideoPlayer] Cleaning up duration timer");
             if (durationTimerRef.current) {
                 clearTimeout(durationTimerRef.current);
                 durationTimerRef.current = null;
             }
             clearInterval(trackingInterval);
         };
-    }, [uri, duration, isPaused, hasEnded, hasStartedPlaying]);
-
-    const handleEnd = () => {
-        console.log("[VideoPlayer] 🎬 handleEnd called:", {
-            hasEnded,
-            hasStartedPlaying,
-            elapsedBeforePause: elapsedBeforePauseRef.current,
-            duration,
-        });
-        if (!hasEnded) {
-            console.log("[VideoPlayer] ✅ Setting hasEnded=true and calling onEnded (advance to next)");
-            setHasEnded(true);
-            // Clear timer
-            if (durationTimerRef.current) {
-                clearTimeout(durationTimerRef.current);
-                durationTimerRef.current = null;
-            }
-            onEnded();
-        } else {
-            console.log("[VideoPlayer] ⚠️ handleEnd called but already ended, ignoring");
-        }
-    };
+    }, [uri, duration, isPaused, hasEnded, hasStartedPlaying, handleEnd]);
 
     const handleError = (error: any) => {
         onError?.(error);
     };
 
     // Track progress for countdown
-    const handleVideoProgress = (data: any) => {
-        console.log("[VideoPlayer] Progress:", {
-            currentTime: data.currentTime,
-            isPaused,
-            hasStartedPlaying,
-            duration,
-            hasEnded,
-        });
+    const handleVideoProgress = useCallback((data: any) => {
+        // Check if URI has changed (prevent old video progress from affecting new video)
+        if (previousUriRef.current !== uri) {
+            return;
+        }
 
         // اگر ویدیو progress داره و pause نیست، یعنی واقعاً پخش شده
         if (!isPaused && data.currentTime > 0 && !hasStartedPlaying) {
-            console.log("[VideoPlayer] ✅ Video started playing! currentTime:", data.currentTime);
+            console.log("[VideoPlayer] ▶️ Started playing:", data.currentTime.toFixed(1));
             setHasStartedPlaying(true);
-            // Reset elapsed time چون تازه شروع شده
             elapsedBeforePauseRef.current = 0;
         }
 
         // ⚠️ CRITICAL: اگر ویدیو به duration رسیده یا ازش گذشته، advance کن
-        // این چک باید قبل از onProgress باشه تا اگه duration رسید، advance کنه
         if (!hasEnded && hasStartedPlaying && !isPaused && data.currentTime >= duration) {
-            console.log("[VideoPlayer] ⏰ Video reached duration limit via progress!", {
-                currentTime: data.currentTime,
+            console.log("[VideoPlayer] ⏰ Duration reached:", {
+                currentTime: data.currentTime.toFixed(1),
                 duration,
-                difference: data.currentTime - duration,
             });
             handleEnd();
-            return; // Return early تا onProgress صدا زده نشه
+            return;
         }
 
         if (onProgress && !isPaused && !hasEnded) {
             onProgress(data.currentTime);
         }
-    };
-
-    // Track if we've already tried to seek (prevent infinite loop)
-    const hasSeekedRef = useRef(false);
-
-    useEffect(() => {
-        // Reset seek flag when URI changes
-        hasSeekedRef.current = false;
-    }, [uri]);
-
-    // Handle video load - فقط یکبار seek کن
-    const handleLoad = () => {
-        console.log("[VideoPlayer] Video loaded, isPaused:", isPaused, "hasSeeked:", hasSeekedRef.current);
-        if (!isPaused && videoRef.current && !hasSeekedRef.current) {
-            hasSeekedRef.current = true;
-            // فقط یکبار seek کن برای اطمینان از شروع پخش
-            setTimeout(() => {
-                if (videoRef.current && !isPaused) {
-                    console.log("[VideoPlayer] Seeking to start (one time only)");
-                    videoRef.current.seek(0);
-                }
-            }, 100);
-        }
-    };
-
-    // Handle ready for display - حذف شد چون باعث infinite loop میشد
-    // const handleReadyForDisplay = () => {
-    //     // حذف شد - این callback مدام صدا زده میشه و seek(0) باعث reset شدن ویدیو میشه
-    // };
+    }, [uri, isPaused, hasStartedPlaying, hasEnded, duration, handleEnd, onProgress]);
 
     return (
         <View style={styles.container}>
             <Video
-                key={uri} // Force re-render when URI changes
                 ref={videoRef}
                 source={{ uri }}
                 style={styles.video}
@@ -202,7 +168,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
                 volume={1.0}
                 playInBackground={false}
                 playWhenInactive={false}
-                onLoad={handleLoad}
                 onEnd={handleEnd}
                 onError={handleError}
                 onProgress={handleVideoProgress}
@@ -211,6 +176,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
                 poster={undefined}
                 posterResizeMode="cover"
                 progressUpdateInterval={250}
+                bufferConfig={{
+                    minBufferMs: 1000,
+                    maxBufferMs: 5000,
+                    bufferForPlaybackMs: 500,
+                    bufferForPlaybackAfterRebufferMs: 1000,
+                }}
             />
         </View>
     );

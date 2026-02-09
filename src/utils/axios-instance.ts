@@ -118,23 +118,23 @@ axiosInstance.interceptors.request.use(
                 config.headers.Authorization = `Bearer ${token}`;
             }
         } catch (error) {
-            console.error("Error getting token in interceptor:", error);
+            // console.error("Error getting token in interceptor:", error);
         }
 
-        // Log request
-        if (__DEV__) {
-            const requestInfo = formatRequestForLog(config);
-            console.group(`🌐 [${requestInfo.method}] ${requestInfo.endpoint}`);
-            console.log("📍 Full URL:", requestInfo.url);
-            console.log("📤 Request Headers:", requestInfo.headers);
-            if (requestInfo.params) {
-                console.log("🔗 Query Params:", requestInfo.params);
-            }
-            if (requestInfo.body) {
-                console.log("📦 Request Body:", requestInfo.body);
-            }
-            console.groupEnd();
-        }
+        // Log request - TEMPORARILY COMMENTED FOR VIDEO DEBUGGING
+        // if (__DEV__) {
+        //     const requestInfo = formatRequestForLog(config);
+        //     console.group(`🌐 [${requestInfo.method}] ${requestInfo.endpoint}`);
+        //     console.log("📍 Full URL:", requestInfo.url);
+        //     console.log("📤 Request Headers:", requestInfo.headers);
+        //     if (requestInfo.params) {
+        //         console.log("🔗 Query Params:", requestInfo.params);
+        //     }
+        //     if (requestInfo.body) {
+        //         console.log("📦 Request Body:", requestInfo.body);
+        //     }
+        //     console.groupEnd();
+        // }
 
         return config;
     },
@@ -149,40 +149,40 @@ axiosInstance.interceptors.request.use(
 
 axiosInstance.interceptors.response.use(
     (response) => {
-        // Log response
-        if (__DEV__) {
-            const responseInfo = formatResponseForLog(response);
-            const statusColor = responseInfo.status >= 200 && responseInfo.status < 300 ? "✅" : responseInfo.status >= 300 && responseInfo.status < 400 ? "⚠️" : "❌";
+        // Log response - TEMPORARILY COMMENTED FOR VIDEO DEBUGGING
+        // if (__DEV__) {
+        //     const responseInfo = formatResponseForLog(response);
+        //     const statusColor = responseInfo.status >= 200 && responseInfo.status < 300 ? "✅" : responseInfo.status >= 300 && responseInfo.status < 400 ? "⚠️" : "❌";
 
-            console.group(`${statusColor} [${responseInfo.method}] ${responseInfo.endpoint} - ${responseInfo.status} ${responseInfo.statusText}`);
-            console.log("📍 Full URL:", responseInfo.url);
-            console.log("📥 Response Data:", responseInfo.data);
-            console.groupEnd();
-        }
+        //     console.group(`${statusColor} [${responseInfo.method}] ${responseInfo.endpoint} - ${responseInfo.status} ${responseInfo.statusText}`);
+        //     console.log("📍 Full URL:", responseInfo.url);
+        //     console.log("📥 Response Data:", responseInfo.data);
+        //     console.groupEnd();
+        // }
 
         return response;
     },
     async (error: AxiosError) => {
         const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-        // Log error
-        if (__DEV__) {
-            const errorInfo = formatErrorForLog(error);
-            console.group(`❌ [${errorInfo.method}] ${errorInfo.endpoint} - Error`);
-            console.log("📍 Full URL:", errorInfo.url);
-            if (error.response) {
-                console.log("📥 Status:", errorInfo.status, errorInfo.statusText);
-                console.log("📥 Response Data:", errorInfo.data);
-                console.log("💬 Error Message:", errorInfo.message);
-            } else if (error.request) {
-                console.log("⚠️ No Response Received");
-                console.log("💬 Error Message:", errorInfo.message);
-            } else {
-                console.log("⚠️ Request Setup Error");
-                console.log("💬 Error Message:", errorInfo.message);
-            }
-            console.groupEnd();
-        }
+        // Log error - TEMPORARILY COMMENTED FOR VIDEO DEBUGGING
+        // if (__DEV__) {
+        //     const errorInfo = formatErrorForLog(error);
+        //     console.group(`❌ [${errorInfo.method}] ${errorInfo.endpoint} - Error`);
+        //     console.log("📍 Full URL:", errorInfo.url);
+        //     if (error.response) {
+        //         console.log("📥 Status:", errorInfo.status, errorInfo.statusText);
+        //         console.log("📥 Response Data:", errorInfo.data);
+        //         console.log("💬 Error Message:", errorInfo.message);
+        //     } else if (error.request) {
+        //         console.log("⚠️ No Response Received");
+        //         console.log("💬 Error Message:", errorInfo.message);
+        //     } else {
+        //         console.log("⚠️ Request Setup Error");
+        //         console.log("💬 Error Message:", errorInfo.message);
+        //     }
+        //     console.groupEnd();
+        // }
 
         // اگر 401 بود - توکن دستگاه رو پاک نمیکنیم
         // چون پاک کردنش باعث infinite loop میشه
