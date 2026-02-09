@@ -189,7 +189,8 @@ const styles = StyleSheet.create({
     contentContainer: {
         flex: 1,
         paddingVertical: 24,
-        paddingHorizontal: 28,
+
+        paddingHorizontal: 14,
         justifyContent: "space-between",
     },
     loadingContainer: {

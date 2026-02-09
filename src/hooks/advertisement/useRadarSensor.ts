@@ -45,6 +45,7 @@ export const useRadarSensor = () => {
         
         // ✅ فقط اگر واقعاً disconnected بود، state رو update کن
         if (!isConnectedRef.current) {
+            console.log('[useRadarSensor] ✅ Sensor reconnected, data received');
             isConnectedRef.current = true;
             setIsConnected(true);
         }
@@ -59,14 +60,28 @@ export const useRadarSensor = () => {
     // 🔌 تابع connect با race condition protection و exponential backoff
     const attemptConnect = useCallback(async () => {
         // ⛔ جلوگیری از multiple concurrent attempts
-        if (isConnectingRef.current || isConnectedRef.current) {
+        if (isConnectingRef.current) {
+            console.log('[useRadarSensor] ⚠️ Already connecting, skipping...');
             return;
         }
 
+        // اگر RadarLogic disconnected شده ولی ما connected فکر می‌کنیم، reset کن
+        if (!RadarLogic.isConnected && isConnectedRef.current) {
+            console.log('[useRadarSensor] 🔄 RadarLogic disconnected, resetting state');
+            isConnectedRef.current = false;
+            setIsConnected(false);
+            setIsPresence(false);
+            setDistance(0);
+            setStatusText('Not Available');
+        }
+
         isConnectingRef.current = true;
+        console.log('[useRadarSensor] 🔌 Attempting to connect to sensor...');
 
         try {
             await RadarLogic.connect('/dev/ttyS1', 115200);
+            
+            console.log('[useRadarSensor] ✅ Connection successful, waiting for data...');
             
             // ✅ اتصال موفق - reset retry count
             retryCountRef.current = 0;
@@ -74,8 +89,11 @@ export const useRadarSensor = () => {
             // ⏱️ Timeout: اگر بعد از 5 ثانیه data نیومد، mark as disconnected
             connectionTimeoutRef.current = setTimeout(() => {
                 if (lastDataTimeRef.current === 0 && mountedRef.current) {
+                    console.log('[useRadarSensor] ⚠️ No data received after 5s, marking as disconnected');
                     isConnectedRef.current = false;
                     setIsConnected(false);
+                    setIsPresence(false);
+                    setDistance(0);
                     setStatusText('Not Available');
                 }
                 isConnectingRef.current = false;
@@ -83,11 +101,14 @@ export const useRadarSensor = () => {
             
         } catch (error: any) {
             // ❌ اتصال ناموفق - increase retry count
+            console.log('[useRadarSensor] ❌ Connection failed:', error?.message || error);
             retryCountRef.current++;
             
             if (mountedRef.current) {
                 isConnectedRef.current = false;
                 setIsConnected(false);
+                setIsPresence(false);
+                setDistance(0);
                 setStatusText('Not Available');
             }
             isConnectingRef.current = false;
@@ -106,16 +127,30 @@ export const useRadarSensor = () => {
         // اولین تلاش
         attemptConnect();
 
-        // 🔄 Health check: هر 30 ثانیه وضعیت رو چک کن
+        // 🔄 Health check: هر 5 ثانیه وضعیت رو چک کن (سریع‌تر برای تشخیص قطع سریع)
         retryIntervalRef.current = setInterval(() => {
             if (!mountedRef.current) return;
 
-            const timeSinceLastData = Date.now() - lastDataTimeRef.current;
+            // ⚠️ CRITICAL: چک کن که RadarLogic واقعاً connected هست یا نه
+            const radarLogicConnected = RadarLogic.isConnected;
+            const timeSinceLastData = lastDataTimeRef.current > 0 ? Date.now() - lastDataTimeRef.current : Infinity;
+
+            // اگر RadarLogic disconnected شده ولی ما هنوز connected فکر می‌کنیم
+            if (!radarLogicConnected && isConnectedRef.current) {
+                console.log('[useRadarSensor] ⚠️ RadarLogic disconnected but state says connected, fixing...');
+                isConnectedRef.current = false;
+                setIsConnected(false);
+                setIsPresence(false); // Reset presence
+                setDistance(0);
+                setStatusText('Not Available');
+                lastDataTimeRef.current = 0;
+                isConnectingRef.current = false;
+            }
 
             // اگر هنوز data نگرفتیم یا خیلی وقته data نیومده
             if (lastDataTimeRef.current === 0) {
                 // هنوز اصلاً متصل نشدیم - retry با exponential backoff
-                if (!isConnectingRef.current) {
+                if (!isConnectingRef.current && !radarLogicConnected) {
                     // 📈 Exponential backoff: 2s, 4s, 8s, 16s, max 30s
                     const backoffDelay = Math.min(2000 * Math.pow(2, retryCountRef.current), 30000);
                     
@@ -125,11 +160,15 @@ export const useRadarSensor = () => {
                         }
                     }, backoffDelay);
                 }
-            } else if (timeSinceLastData > 120000) {
-                // 2 دقیقه data نیومده - احتمالاً disconnected شده
+            } else if (timeSinceLastData > 10000) {
+                // ⚠️ 10 ثانیه data نیومده - احتمالاً disconnected شده (سریع‌تر از قبل)
                 if (isConnectedRef.current) {
+                    console.log('[useRadarSensor] ⚠️ No data for 10s, marking as disconnected');
                     isConnectedRef.current = false;
                     setIsConnected(false);
+                    setIsPresence(false); // Reset presence
+                    setDistance(0);
+                    setStatusText('Not Available');
                     RadarLogic.disconnect();
                     lastDataTimeRef.current = 0;
                     isConnectingRef.current = false;
@@ -144,7 +183,7 @@ export const useRadarSensor = () => {
                 }
             }
             // اگه connected هستیم و data میاد، هیچ کاری نکن ✅
-        }, 30 * 1000);
+        }, 5 * 1000); // هر 5 ثانیه چک کن (به جای 30 ثانیه)
 
         // 🧹 Cleanup - guaranteed to run on unmount
         return () => {

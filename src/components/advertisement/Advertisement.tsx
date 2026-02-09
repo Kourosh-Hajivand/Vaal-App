@@ -13,6 +13,7 @@ import { useRadarSensor } from "@/src/hooks/advertisement/useRadarSensor";
 import { cacheManager } from "@/src/utils/cache/cacheManager";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageDisplay } from "./ImageDisplay";
+import { Image } from "expo-image";
 import type { ContentItemResource, PlaylistItemResource } from "@/src/types/api.types";
 
 // Extended type با duration محاسبه شده (برای display)
@@ -47,6 +48,7 @@ export const Advertisement: React.FC = () => {
     const [retryCount, setRetryCount] = useState<Map<string, number>>(new Map());
     const [videoProgress, setVideoProgress] = useState(0);
     const [remainingTime, setRemainingTime] = useState(0);
+    const [videoKey, setVideoKey] = useState(0); // برای force reset کردن VideoPlayer وقتی همون ویدیو تکرار میشه
 
     // Track playlist ID to detect changes
     const currentPlaylistIdRef = useRef<string | null>(null);
@@ -89,6 +91,7 @@ export const Advertisement: React.FC = () => {
         if (currentPlaylistIdRef.current !== playlistId) {
             currentPlaylistIdRef.current = playlistId;
             setCurrentIndex(0);
+            setVideoKey(0); // Reset videoKey هم
             setLocalPaths(new Map());
             setDownloadStatus(new Map());
         }
@@ -226,6 +229,12 @@ export const Advertisement: React.FC = () => {
     // Pause/Resume based on sensor
     useEffect(() => {
         const newPausedState = !shouldPlay;
+        console.log("[Advertisement] Setting paused state:", {
+            shouldPlay,
+            isSensorConnected,
+            isPresence,
+            newPausedState,
+        });
         setIsPaused(newPausedState);
     }, [shouldPlay, isPresence, isSensorConnected]);
 
@@ -263,39 +272,105 @@ export const Advertisement: React.FC = () => {
 
     // Advance to next item
     const advanceToNext = useCallback(() => {
-        if (!readyItems.length) return;
+        console.log("[Advertisement] 🎬 advanceToNext called:", {
+            currentIndex,
+            readyItemsLength: readyItems.length,
+            currentItemId: currentItem?.id,
+        });
+
+        if (!readyItems.length) {
+            console.log("[Advertisement] ⚠️ No ready items, cannot advance");
+            return;
+        }
 
         const nextIndex = (currentIndex + 1) % readyItems.length;
+        const nextItem = readyItems[nextIndex];
+        const isSameVideo = nextItem?.content?.id === currentItem?.id;
+
+        console.log("[Advertisement] ✅ Advancing to next item:", {
+            from: currentIndex,
+            to: nextIndex,
+            nextItemId: nextItem?.content?.id,
+            isSameVideo,
+        });
+
+        // اگر همون ویدیو تکرار شد، باید VideoPlayer رو force reset کنیم
+        // با تغییر دادن videoKey که در key prop استفاده میشه
+        if (isSameVideo && currentItem?.type === "video") {
+            console.log("[Advertisement] 🔄 Same video, forcing reset VideoPlayer by changing key");
+            setVideoKey((prev) => prev + 1); // تغییر key برای force re-render
+        }
+
         setCurrentIndex(nextIndex);
         setVideoProgress(0);
         setRemainingTime(0);
         itemStartTimeRef.current = Date.now();
-    }, [currentIndex, readyItems.length]);
+    }, [currentIndex, readyItems.length, readyItems, currentItem?.id, currentItem?.type]);
 
-    // Track item start time
+    // Track item start time - فقط وقتی ویدیو شروع به پخش کرد
     useEffect(() => {
+        // Reset وقتی آیتم عوض شد
         itemStartTimeRef.current = Date.now();
         setVideoProgress(0);
         setRemainingTime(currentItem?.duration || 0);
     }, [currentIndex, currentItem?.id]);
 
-    // Update remaining time countdown
+    // Update remaining time countdown - فقط وقتی ویدیو واقعاً پخش شده
     useEffect(() => {
-        if (!currentItem || isPaused) return;
+        console.log("[Advertisement] Remaining time effect:", {
+            hasCurrentItem: !!currentItem,
+            type: currentItem?.type,
+            isPaused,
+            videoProgress,
+            duration: currentItem?.duration,
+        });
+
+        if (!currentItem || isPaused) {
+            console.log("[Advertisement] Skipping remaining time update:", { hasCurrentItem: !!currentItem, isPaused });
+            return;
+        }
+
+        // اگر ویدیو هست و هنوز progress نداره، timer رو شروع نکن
+        if (currentItem.type === "video" && videoProgress === 0) {
+            console.log("[Advertisement] Video progress is 0, setting remaining to duration");
+            setRemainingTime(currentItem.duration || 0);
+            return;
+        }
 
         const interval = setInterval(() => {
-            const elapsed = (Date.now() - itemStartTimeRef.current) / 1000;
-            const remaining = Math.max(0, (currentItem.duration || 0) - elapsed);
-            setRemainingTime(remaining);
+            if (currentItem.type === "video") {
+                // برای ویدیو، از videoProgress استفاده کن (از VideoPlayer میاد)
+                const remaining = Math.max(0, (currentItem.duration || 0) - videoProgress);
+                console.log("[Advertisement] Updating remaining time (video):", {
+                    videoProgress,
+                    duration: currentItem.duration,
+                    remaining,
+                });
+                setRemainingTime(remaining);
+            } else {
+                // برای عکس، از elapsed time استفاده کن
+                const elapsed = (Date.now() - itemStartTimeRef.current) / 1000;
+                const remaining = Math.max(0, (currentItem.duration || 0) - elapsed);
+                setRemainingTime(remaining);
+            }
         }, 100); // Update هر 100ms برای smooth countdown
 
         return () => clearInterval(interval);
-    }, [currentItem?.id, currentItem?.duration, isPaused]);
+    }, [currentItem?.id, currentItem?.duration, currentItem?.type, isPaused, videoProgress]);
 
     // Video progress handler
-    const handleVideoProgress = useCallback((currentTime: number) => {
-        setVideoProgress(currentTime);
-    }, []);
+    const handleVideoProgress = useCallback(
+        (currentTime: number) => {
+            console.log("[Advertisement] Video progress:", {
+                currentTime,
+                itemId: currentItem?.id,
+                duration: currentItem?.duration,
+                remaining: currentItem ? (currentItem.duration || 0) - currentTime : 0,
+            });
+            setVideoProgress(currentTime);
+        },
+        [currentItem?.id, currentItem?.duration],
+    );
 
     // Auto-advance timer for images (video خودش timer داره)
     usePlaylistTimer({
@@ -307,9 +382,34 @@ export const Advertisement: React.FC = () => {
     // Get local path for current item
     const localPath = currentItem ? localPaths.get(currentItem.id.toString()) : null;
 
+    // وقتی ویدیو جدید لود شد، مطمئن شو که play میشه (اگر نباید pause باشه)
+    useEffect(() => {
+        if (currentItem && localPath && currentItem.type === "video") {
+            console.log("[Advertisement] Video loaded:", {
+                itemId: currentItem.id,
+                shouldPlay,
+                isPaused,
+            });
+            // اگر نباید pause باشه، مطمئن شو که play میشه
+            if (shouldPlay && isPaused) {
+                console.log("[Advertisement] Force unpausing video");
+                setIsPaused(false);
+            }
+        }
+    }, [currentItem?.id, localPath, shouldPlay, isPaused]);
+
     // ========================================================================
     // Render States
     // ========================================================================
+
+    // Fallback: هیچ آیتمی در playlist نیست → نمایش عکس fallback
+    if (!isLoading && !playlist?.items?.length) {
+        return (
+            <View style={styles.fallbackContainer}>
+                <Image source={require("../../../assets/images/fallback-advertisement.png")} style={styles.fallbackImage} contentFit="cover" transition={300} />
+            </View>
+        );
+    }
 
     // Loading: نمایش زیبا با gradient
     if (!isInitialized) {
@@ -352,10 +452,21 @@ export const Advertisement: React.FC = () => {
     // Render video or image
     return (
         <View style={styles.container}>
-            {currentItem.type === "video" ? <VideoPlayer uri={localPath} duration={currentItem.duration} onEnded={advanceToNext} isPaused={isPaused} onProgress={handleVideoProgress} /> : <ImageDisplay uri={localPath} />}
+            {currentItem.type === "video" ? (
+                <VideoPlayer
+                    key={`${currentItem.id}-${videoKey}`} // Force reset وقتی videoKey تغییر کنه
+                    uri={localPath}
+                    duration={currentItem.duration}
+                    onEnded={advanceToNext}
+                    isPaused={isPaused}
+                    onProgress={handleVideoProgress}
+                />
+            ) : (
+                <ImageDisplay uri={localPath} />
+            )}
 
             {/* Debug Overlay */}
-            {/* {__DEV__ && (
+            {__DEV__ && (
                 <View style={styles.debugOverlay}>
                     <Text style={styles.debugText}>
                         📹 {currentItem.title} ({currentIndex + 1}/{readyItems.length})
@@ -386,7 +497,7 @@ export const Advertisement: React.FC = () => {
                     </Text>
                     {(playlist?.items?.length || 0) > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
                 </View>
-            )} */}
+            )}
         </View>
     );
 };
@@ -397,6 +508,18 @@ const styles = StyleSheet.create({
         backgroundColor: "#000",
         borderRadius: 14,
         overflow: "hidden",
+    },
+    fallbackContainer: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#000",
+        borderRadius: 14,
+        overflow: "hidden",
+    },
+    fallbackImage: {
+        width: "100%",
+        height: "100%",
     },
     loadingContainer: {
         flex: 1,

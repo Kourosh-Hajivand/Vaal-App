@@ -119,7 +119,7 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: "black" }]}>
             {/* StatusBar */}
             <StatusBar hidden={true} barStyle={mode === "dark" ? "light-content" : "dark-content"} />
 
@@ -146,16 +146,15 @@ const styles = StyleSheet.create({
     mainLayout: {
         flex: 1,
         flexDirection: "row",
-        padding: 24,
-        gap: 12,
+        gap: 10,
     },
     advertisementSection: {
-        flex: 55,
+        flex: 50,
         borderRadius: 14,
         overflow: "hidden",
     },
     clockSection: {
-        flex: 45,
+        flex: 50,
     },
     backButton: {
         position: "absolute",
