@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { StyleSheet, View, ActivityIndicator, StatusBar } from "react-native";
+import { StyleSheet, View, ActivityIndicator, StatusBar, Platform } from "react-native";
 import { useFonts } from "expo-font";
+import * as NavigationBar from "expo-navigation-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
@@ -59,6 +60,22 @@ export default function App() {
     useEffect(() => {
         screenRef.current = screen;
     }, [screen]);
+
+    // کیوسک برای کل اپ (نه فقط Home)
+    useEffect(() => {
+        const enableKioskMode = async () => {
+            try {
+                if (Platform.OS === "android") {
+                    await NavigationBar.setVisibilityAsync("hidden");
+                    await NavigationBar.setBehaviorAsync("overlay-swipe");
+                    console.log("✅ [KIOSK] Mode enabled for entire app");
+                }
+            } catch (error) {
+                console.error("❌ [KIOSK] Error:", error);
+            }
+        };
+        enableKioskMode();
+    }, []);
 
     // بررسی اولیه وضعیت (token → network)
     const checkInitialStatus = useCallback(async () => {

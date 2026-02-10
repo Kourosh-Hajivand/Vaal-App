@@ -2,6 +2,7 @@ import { axiosInstance } from "@/src/utils/axios-instance";
 import { routes } from "@/src/routes/routes";
 import type {
     ApiResponse,
+    DeviceResource,
     RegisterDeviceRequest,
     ActivateDeviceRequest,
     DeviceRegisterResponse,
@@ -29,18 +30,28 @@ import type {
 export const deviceService = {
     /**
      * Register a new device
+     * API returns { data: DeviceResource, message, status } — برمی‌گردونیم data تا pair_code در دسترس باشه
      */
-    register: async (data: RegisterDeviceRequest) => {
-        const response = await axiosInstance.post<DeviceRegisterResponse>(routes.devices.register(), data);
-        return response.data;
+    register: async (data: RegisterDeviceRequest): Promise<DeviceResource> => {
+        const response = await axiosInstance.post<ApiResponse<DeviceResource>>(routes.devices.register(), data);
+        const apiResponse = response.data as ApiResponse<DeviceResource>;
+        if (apiResponse?.data) {
+            return apiResponse.data;
+        }
+        return response.data as unknown as DeviceResource;
     },
 
     /**
      * Activate device and get token
+     * API returns { data: DeviceResource (با token), message, status } — برمی‌گردونیم data
      */
-    activate: async (data: ActivateDeviceRequest) => {
-        const response = await axiosInstance.post<DeviceActivateResponse>(routes.devices.activate(), data);
-        return response.data;
+    activate: async (data: ActivateDeviceRequest): Promise<DeviceResource> => {
+        const response = await axiosInstance.post<ApiResponse<DeviceResource>>(routes.devices.activate(), data);
+        const apiResponse = response.data as ApiResponse<DeviceResource>;
+        if (apiResponse?.data) {
+            return apiResponse.data;
+        }
+        return response.data as unknown as DeviceResource;
     },
 
     /**

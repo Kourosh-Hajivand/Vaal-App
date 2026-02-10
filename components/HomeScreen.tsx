@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
-import { StyleSheet, View, StatusBar, Platform, TouchableOpacity, Text } from "react-native";
+import { StyleSheet, View, StatusBar, TouchableOpacity, Text } from "react-native";
 import { tokenService, deviceService } from "../src/services";
 import { pairCodeService } from "../src/services/pairCodeService";
-import * as NavigationBar from "expo-navigation-bar";
 import { Advertisement } from "../src/components/advertisement/Advertisement";
 import { Clock } from "../src/components/clock/Clock";
 import { SensorTestScreen } from "./SensorTestScreen";
@@ -22,37 +21,17 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
         enabled: true,
     });
 
-    // Native APK Update — چک APK جدید هر 30 دقیقه
+    // Native APK Update — فعلاً غیرفعال (API مسیر app-version روی سرور وجود نداره)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const appUpdate = useAppUpdate({
-        checkInterval: 30 * 60 * 1000, // هر 30 دقیقه
+        checkInterval: 30 * 60 * 1000,
         autoInstall: true,
-        enabled: true,
+        enabled: false, // تا وقتی route /api/devices/app-version اضافه نشه، کال نزن
     });
 
     const [showTestScreen, setShowTestScreen] = useState(false);
     const tapCountRef = useRef(0);
     const tapTimerRef = useRef<number | null>(null);
-    // Enable Kiosk Mode (Full Immersive)
-    useEffect(() => {
-        enableKioskMode();
-
-        return () => {
-            // Cleanup not needed - stay in kiosk mode
-        };
-    }, []);
-
-    const enableKioskMode = async () => {
-        try {
-            if (Platform.OS === "android") {
-                // Hide navigation bar and make it immersive
-                await NavigationBar.setVisibilityAsync("hidden");
-                await NavigationBar.setBehaviorAsync("overlay-swipe");
-                console.log("✅ Kiosk mode enabled");
-            }
-        } catch (error) {
-            console.error("❌ Error enabling kiosk mode:", error);
-        }
-    };
 
     // Token validation هر 5 دقیقه
     useEffect(() => {

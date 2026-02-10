@@ -11,6 +11,7 @@
     "lint": "expo lint",
     "build:debug": "cd android && ./gradlew assembleDebug && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/debug/app-debug.apk'",
     "build:release": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/release/app-release.apk'",
+    "build:production": "eas build --profile production --platform android",
     "update:production": "eas update --branch production",
     "update:preview": "eas update --branch preview"
   },
