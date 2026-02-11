@@ -29,5 +29,9 @@ export { useOnlineStatus } from "./use-online-status";
 export { useOTAUpdate } from "./useOTAUpdate";
 export { useAppUpdate } from "./useAppUpdate";
 
+// Weather forecast (OpenWeather, رایگان)
+export { useWeatherForecast } from "./useWeatherForecast";
+export { useCurrentWeather } from "./useCurrentWeather";
+
 // ⚠️ Manager hooks حذف شدن چون این app فقط device است (React Native)
 // Manager hooks فقط برای web dashboard (Next.js) لازم هستن

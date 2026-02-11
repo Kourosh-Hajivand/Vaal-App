@@ -7,3 +7,4 @@ export { Weather } from "./Weather";
 export { AnnouncementList } from "./AnnouncementList";
 export { ContactsBar } from "./ContactsBar";
 export { Emergency } from "./Emergency";
+export { WeatherForecast } from "./WeatherForecast";

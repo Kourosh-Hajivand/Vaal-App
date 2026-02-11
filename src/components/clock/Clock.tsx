@@ -5,19 +5,23 @@
  */
 import React, { useEffect, useState, useMemo } from "react";
 import { View, StyleSheet, ActivityIndicator } from "react-native";
-import { Image } from "expo-image";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
 import { Weather } from "./Weather";
 import { AnnouncementList } from "./AnnouncementList";
+import { WeatherForecast } from "./WeatherForecast";
 import { ContactsBar } from "./ContactsBar";
 import CloudLayer from "./CloudLayer";
 import { Emergency } from "./Emergency";
 import { useDeviceInfo, useRandomSnippet } from "@/src/hooks/device/useDeviceInfo";
+import { useDeviceAnnouncements } from "@/src/hooks/announcement/useDeviceAnnouncements";
+import { useCurrentWeather } from "@/src/hooks/useCurrentWeather";
 import { getIranTime, getPersianDayOfMonth, getPersianDayOfWeek, getPersianMonthName, isDayTime } from "@/src/utils/time/iranTime";
 import { useTheme } from "@/src/contexts/ThemeContext";
+import { getWeatherIcon } from "@/src/constants/weatherIcons";
+import { weatherCodeToCategory } from "@/src/services/weatherForecast.service";
 import Svg, { Path } from "react-native-svg";
-import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
 
 const formatTimeWithoutSeconds = (date: Date): string => {
     let hours = date.getHours();
@@ -38,7 +42,27 @@ export const Clock: React.FC = () => {
     const { colors, isDark } = useTheme();
 
     const { data: device, isLoading } = useDeviceInfo();
+    const { data: announcements } = useDeviceAnnouncements();
     const { data: randomSnippet, isLoading: isLoadingSnippet } = useRandomSnippet();
+    const { data: currentWeather } = useCurrentWeather({ enabled: true });
+
+    const hasAnnouncements = useMemo(() => {
+        if (!announcements?.length) return false;
+        const now = getIranTime();
+        const active = announcements.filter((a) => {
+            if (a.status !== "active") return false;
+            if (a.start_date) {
+                const d = new Date(a.start_date);
+                if (isNaN(d.getTime()) || now < d) return false;
+            }
+            if (a.end_date) {
+                const d = new Date(a.end_date);
+                if (!isNaN(d.getTime()) && now > d) return false;
+            }
+            return true;
+        });
+        return active.length > 0;
+    }, [announcements]);
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -94,10 +118,10 @@ export const Clock: React.FC = () => {
                 {contentWidth > 0 && <CloudLayer contentWidth={contentWidth} />}
                 {/* Header: Building info */}
                 <View style={styles.header}>
-                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: "white" }}>
+                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: isDark ? "white" : "rgba(0, 0, 0, 0.80)" }}>
                         {device?.building?.manager_name ? `مدیریت ${device.building.manager_name}` : ""}
                     </CustomText>
-                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: "white" }}>
+                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: isDark ? "white" : "rgba(0, 0, 0, 0.80)" }}>
                         {device?.building?.name ? `ساختمان ${device.building.name}` : ""}
                     </CustomText>
                 </View>
@@ -112,41 +136,60 @@ export const Clock: React.FC = () => {
                     {/* Date & Weather */}
 
                     <View style={[styles.dateWeather, { backgroundColor: isDark ? "#192634" : "#F8F8F8" }]}>
-                        <Weather />
                         <View style={styles.dateContainer}>
                             <View style={styles.dateRow}>
-                                <CustomText fontType="YekanBakh" weight="Regular" size={12}>
-                                    {getPersianMonthName(time)}
-                                </CustomText>
-                                <CustomText fontType="Michroma" weight="Regular" size={12} style={{ bottom: 3 }}>
-                                    {getPersianDayOfMonth(time)}
+                                {/* Badge آب‌وهوای امروز */}
+                                {currentWeather &&
+                                    (() => {
+                                        const category = weatherCodeToCategory(currentWeather.weathercode);
+                                        const iconSource = getWeatherIcon(category, isDark);
+                                        return iconSource ? (
+                                            <View style={[styles.weatherBadge]}>
+                                                <View style={[styles.badgeIconContainer, { backgroundColor: isDark ? "rgba(0, 0, 0, 0.20)" : "rgba(255,255,255,0.1)" }]}>
+                                                    <Image source={iconSource} style={styles.badgeIcon} contentFit="contain" />
+                                                </View>
+                                                <CustomText fontType="Michroma" weight="Regular" size={10} style={{ lineHeight: 12, color: isDark ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.8)" }}>
+                                                    {currentWeather.temp}°
+                                                </CustomText>
+                                            </View>
+                                        ) : null;
+                                    })()}
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                                    <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ lineHeight: 12 }}>
+                                        {getPersianMonthName(time)}
+                                    </CustomText>
+                                    <CustomText fontType="Michroma" weight="Regular" size={12} style={{ lineHeight: 12 }}>
+                                        {getPersianDayOfMonth(time)}
+                                    </CustomText>
+                                </View>
+                                <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ lineHeight: 12 }}>
+                                    {getPersianDayOfWeek(time)}
                                 </CustomText>
                             </View>
-                            <CustomText fontType="YekanBakh" weight="Regular" size={12}>
-                                {getPersianDayOfWeek(time)}
-                            </CustomText>
                         </View>
                     </View>
 
-                    {/* Announcements */}
-                    <AnnouncementList />
-
-                    {/* Random snippet */}
-                    {/* {!isLoadingSnippet && randomSnippet && (randomSnippet.body || randomSnippet.text) && (
-                        <View style={styles.snippetContainer}>
-                            <View style={styles.snippetBubble}>
-                                <CustomText fontType="YekanBakh" weight="Regular" size={10} style={styles.snippetText}>
-                                    {randomSnippet.body || randomSnippet.text || ""}
-                                </CustomText>
-
-                                <View style={styles.snippetTail}>
-                                    <Svg width={9} height={11} viewBox="0 0 9 11" fill="none">
-                                        <Path d="M4.91406 5.27637C5.4467 6.84091 6.34858 8.31835 7.83594 9.9209C8.04831 10.15 7.89036 10.5287 7.57812 10.5215C5.48083 10.4707 2.43355 10.1705 0.230469 8.59668C0.169557 8.55309 0.12924 8.49193 0.108398 8.4248H0V0H4.91406V5.27637Z" fill="#FD5C02" />
-                                    </Svg>
+                    {hasAnnouncements ? (
+                        <AnnouncementList />
+                    ) : (
+                        <>
+                            <WeatherForecast enabled={true} />
+                            {!isLoadingSnippet && randomSnippet && (randomSnippet.body || randomSnippet.text) && (
+                                <View style={styles.snippetContainer}>
+                                    <View style={styles.snippetBubble}>
+                                        <CustomText fontType="YekanBakh" weight="Regular" size={10} style={styles.snippetText}>
+                                            {randomSnippet.body || randomSnippet.text || ""}
+                                        </CustomText>
+                                        <View style={styles.snippetTail}>
+                                            <Svg width={9} height={11} viewBox="0 0 9 11" fill="none">
+                                                <Path d="M4.91406 5.27637C5.4467 6.84091 6.34858 8.31835 7.83594 9.9209C8.04831 10.15 7.89036 10.5287 7.57812 10.5215C5.48083 10.4707 2.43355 10.1705 0.230469 8.59668C0.169557 8.55309 0.12924 8.49193 0.108398 8.4248H0V0H4.91406V5.27637Z" fill="#FD5C02" />
+                                            </Svg>
+                                        </View>
+                                    </View>
                                 </View>
-                            </View>
-                        </View>
-                    )} */}
+                            )}
+                        </>
+                    )}
                 </View>
 
                 {/* Footer: Contacts */}
@@ -221,20 +264,37 @@ const styles = StyleSheet.create({
         gap: 9,
         borderRadius: 99,
         paddingRight: 10,
-        // paddingLeft: 2,
+
         overflow: "hidden",
-        paddingLeft: 10,
+        paddingLeft: 4,
         paddingVertical: 2,
     },
     dateContainer: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
     },
     dateRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 3,
+        gap: 18,
+    },
+    weatherBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    badgeIconContainer: {
+        width: 20,
+        height: 20,
+        padding: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.20)",
+        borderRadius: 99,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    badgeIcon: {
+        width: 16,
+        height: 16,
     },
     snippetContainer: {
         width: "100%",

@@ -5,12 +5,12 @@
  * 2. در background manifest جدید رو fetch می‌کنه
  * 3. آخرین response از server همیشه اولویت داره
  */
-import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect, useRef } from 'react';
-import { deviceService } from '@/src/services/device.service';
-import { tokenStorage } from '@/src/utils/token-storage';
-import { loadLastManifest, saveLastManifest } from '@/src/utils/storage/playlistStorage';
-import type { ManifestResponse } from '@/src/types/api.types';
+import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
+import { deviceService } from "@/src/services/device.service";
+import { tokenStorage } from "@/src/utils/token-storage";
+import { loadLastManifest, saveLastManifest } from "@/src/utils/storage/playlistStorage";
+import type { ManifestResponse } from "@/src/types/api.types";
 
 export const useDeviceManifest = () => {
     const [hasToken, setHasToken] = useState(false);
@@ -20,31 +20,31 @@ export const useDeviceManifest = () => {
     // بلافاصله cached manifest رو لود کن (فقط یکبار)
     useEffect(() => {
         const init = async () => {
-            console.log('[useDeviceManifest] 📂 Loading cached manifest...');
+            console.log("[useDeviceManifest] 📂 Loading cached manifest...");
             const cached = await loadLastManifest();
             if (cached) {
-                console.log('[useDeviceManifest] ✅ Cached manifest found');
+                console.log("[useDeviceManifest] ✅ Cached manifest found");
                 cachedManifestRef.current = cached;
             } else {
-                console.log('[useDeviceManifest] ⚠️ No cached manifest');
+                console.log("[useDeviceManifest] ⚠️ No cached manifest");
             }
             setCacheLoaded(true);
 
             // چک کردن token
             const token = await tokenStorage.get();
             setHasToken(!!token);
-            console.log('[useDeviceManifest] 🔑 Token:', token ? 'EXISTS' : 'NOT FOUND');
+            console.log("[useDeviceManifest] 🔑 Token:", token ? "EXISTS" : "NOT FOUND");
         };
 
         init();
     }, []);
 
     const query = useQuery({
-        queryKey: ['device', 'manifest'],
+        queryKey: ["device", "manifest"],
         queryFn: async () => {
-            console.log('[useDeviceManifest] 🔄 Fetching manifest from server...');
+            console.log("[useDeviceManifest] 🔄 Fetching manifest from server...");
             const data = await deviceService.getManifest();
-            console.log('[useDeviceManifest] ✅ Got fresh manifest from server');
+            console.log("[useDeviceManifest] ✅ Got fresh manifest from server");
             return data;
         },
         enabled: hasToken && cacheLoaded,
@@ -66,7 +66,7 @@ export const useDeviceManifest = () => {
     // Save to cache when new data arrives از server
     useEffect(() => {
         if (query.data && !query.isPlaceholderData) {
-            console.log('[useDeviceManifest] 💾 Saving FRESH manifest to cache');
+            console.log("[useDeviceManifest] 💾 Saving FRESH manifest to cache");
             saveLastManifest(query.data);
             cachedManifestRef.current = query.data;
         }
@@ -79,10 +79,10 @@ export const useDeviceManifest = () => {
     // Log هر وقت manifest تغییر کرد
     useEffect(() => {
         if (manifest) {
-            console.log('[useDeviceManifest] 📊 Current manifest:', {
+            console.log("[useDeviceManifest] 📊 Current manifest:", {
                 playlistId: manifest.playlist?.id,
                 itemsCount: manifest.playlist?.items?.length || 0,
-                source: query.data ? 'SERVER' : 'CACHE',
+                source: query.data ? "SERVER" : "CACHE",
             });
         }
     }, [manifest?.playlist?.id, query.data]);
@@ -95,4 +95,3 @@ export const useDeviceManifest = () => {
         isLoadingCache: !cacheLoaded,
     };
 };
-
