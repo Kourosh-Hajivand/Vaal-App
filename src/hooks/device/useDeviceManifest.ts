@@ -61,6 +61,9 @@ export const useDeviceManifest = () => {
         // هر 10 ثانیه refetch کن
         refetchInterval: 10 * 1000,
         refetchIntervalInBackground: true,
+        // وقتی آنلاین شد، refetch کن
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: false,
     });
 
     // Save to cache when new data arrives از server

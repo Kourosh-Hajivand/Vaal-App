@@ -11,6 +11,7 @@ import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
+import { AutoRefetchOnReconnect } from "./src/components/shared/AutoRefetchOnReconnect";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
 
@@ -254,6 +255,7 @@ export default function App() {
         return (
             <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
+                    <AutoRefetchOnReconnect />
                     <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
                 </ThemeProvider>
             </PersistQueryClientProvider>
@@ -265,6 +267,7 @@ export default function App() {
         return (
             <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
+                    <AutoRefetchOnReconnect />
                     <HomeScreen onLogout={handleLogout} />
                 </ThemeProvider>
             </PersistQueryClientProvider>

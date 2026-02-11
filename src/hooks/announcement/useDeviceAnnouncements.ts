@@ -82,6 +82,9 @@ export const useDeviceAnnouncements = () => {
         // هر 30 ثانیه refetch کن
         refetchInterval: 30 * 1000,
         refetchIntervalInBackground: true,
+        // وقتی آنلاین شد، refetch کن
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: false,
     });
 
     // Save to cache when new data arrives از server

@@ -101,7 +101,7 @@ export const WeatherForecast: React.FC<WeatherForecastProps> = ({ customIcons, i
         const customNode = customIcons?.[category];
         if (customNode != null) return customNode;
         const source = iconSources?.[category] ?? getWeatherIcon(category, isDark);
-        if (source != null) return <Image source={source} style={[styles.customIcon, { width: iconSize, height: iconSize }]} contentFit="contain" />;
+        if (source != null) return <Image source={source} style={[styles.customIcon, { width: iconSize, height: iconSize }]} contentFit="contain" cachePolicy="memory-disk" />;
         return (
             <CustomText fontType="YekanBakh" weight="Regular" size={16} style={styles.emoji}>
                 {DEFAULT_ICONS[category] ?? DEFAULT_ICONS.unknown}

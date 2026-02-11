@@ -1,9 +1,12 @@
 /**
  * Hook پیش‌بینی آب‌وهوا — OpenWeather، لوکیشن ثابت تهران
- * امروز + ۴ روز بعد
+ * امروز + ۴ روز بعد — با persistent cache برای آفلاین
  */
 import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
 import { weatherForecastService } from "@/src/services/weatherForecast.service";
+import { saveWeatherForecast, loadWeatherForecast } from "@/src/utils/storage/weatherStorage";
+import { useOnlineStatus } from "./use-online-status";
 
 const QUERY_KEY = ["weather", "forecast"] as const;
 
@@ -17,6 +20,21 @@ export interface UseWeatherForecastOptions {
 
 export const useWeatherForecast = (options: UseWeatherForecastOptions = {}) => {
     const { enabled = true, staleTimeMs = 60 * 60 * 1000 } = options;
+    const { isOnline } = useOnlineStatus();
+    const cachedDataRef = useRef<Awaited<ReturnType<typeof weatherForecastService.getForecast>> | null>(null);
+    const [cacheLoaded, setCacheLoaded] = useState(false);
+
+    // بلافاصله cached data رو لود کن
+    useEffect(() => {
+        const init = async () => {
+            const cached = await loadWeatherForecast();
+            if (cached) {
+                cachedDataRef.current = cached;
+            }
+            setCacheLoaded(true);
+        };
+        init();
+    }, []);
 
     const query = useQuery({
         queryKey: QUERY_KEY,
@@ -24,21 +42,38 @@ export const useWeatherForecast = (options: UseWeatherForecastOptions = {}) => {
             try {
                 const data = await weatherForecastService.getForecast(TEHRAN_LAT, TEHRAN_LON);
                 console.log("[useWeatherForecast] ✅ موفق:", data?.length, "روز");
+                // ذخیره در persistent cache
+                if (data.length > 0) {
+                    await saveWeatherForecast(data);
+                    cachedDataRef.current = data;
+                }
                 return data;
             } catch (e) {
                 console.warn("[useWeatherForecast] ❌ خطا در queryFn:", e);
                 throw e;
             }
         },
-        enabled,
+        enabled: enabled && cacheLoaded,
         staleTime: staleTimeMs,
-        gcTime: 24 * 60 * 60 * 1000,
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
+        networkMode: "offlineFirst",
         retry: 2,
         retryDelay: (i) => Math.min(1000 * 2 ** i, 10000),
+        placeholderData: () => cachedDataRef.current || undefined,
+        // وقتی آنلاین شد، refetch کن
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: false,
     });
+
+    // وقتی آنلاین شد و cache قدیمی، refetch کن
+    useEffect(() => {
+        if (isOnline && query.isStale && enabled) {
+            query.refetch();
+        }
+    }, [isOnline, query.isStale, enabled]);
 
     return {
         ...query,
-        forecast: query.data ?? [],
+        forecast: query.data ?? cachedDataRef.current ?? [],
     };
 };
