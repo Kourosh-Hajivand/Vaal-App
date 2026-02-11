@@ -118,8 +118,8 @@ export const useDeviceAnnouncements = (enabled: boolean = true) => {
             }
             return failureCount < 5;
         },
-        staleTime: getStaleTime(60 * 1000),
-        gcTime: getGcTime(24 * 60 * 60 * 1000),
+        staleTime: 10 * 1000, // 10 seconds - باید کمتر از refetchInterval باشه
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
@@ -178,31 +178,15 @@ export const useDeviceManifest = () => {
             }
             return failureCount < 5;
         },
-        staleTime: getStaleTime(60 * 1000),
-        gcTime: getGcTime(24 * 60 * 60 * 1000),
+        staleTime: 10 * 1000, // 10 seconds
+        gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         placeholderData: (previousData) => previousData,
         throwOnError: false,
-        refetchInterval: (query) => {
-            if (typeof navigator !== "undefined" && !navigator.onLine) {
-                return false;
-            }
-            if (!hasToken) {
-                return false;
-            }
-            if (query.state.error && (query.state.error as any)?.response?.status === 401) {
-                return false;
-            }
-            if (query.state.error && query.state.data) {
-                return 10 * 1000;
-            }
-            if (!query.state.data) {
-                return 5 * 1000;
-            }
-            return 10 * 1000;
-        },
+        // هر 10 ثانیه refetch کن
+        refetchInterval: 10 * 1000,
         refetchIntervalInBackground: true,
     });
 };

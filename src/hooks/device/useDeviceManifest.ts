@@ -66,7 +66,6 @@ export const useDeviceManifest = () => {
         refetchOnWindowFocus: false,
     });
 
-    // Save to cache when new data arrives از server
     useEffect(() => {
         if (query.data && !query.isPlaceholderData) {
             console.log("[useDeviceManifest] 💾 Saving FRESH manifest to cache");
@@ -80,15 +79,16 @@ export const useDeviceManifest = () => {
     const manifest = query.data || cachedManifestRef.current || null;
 
     // Log هر وقت manifest تغییر کرد
+
+    // Log برای refetch status
     useEffect(() => {
-        if (manifest) {
-            console.log("[useDeviceManifest] 📊 Current manifest:", {
-                playlistId: manifest.playlist?.id,
-                itemsCount: manifest.playlist?.items?.length || 0,
-                source: query.data ? "SERVER" : "CACHE",
-            });
+        if (query.isFetching) {
+            console.log("[useDeviceManifest] 🔄 Fetching manifest...");
         }
-    }, [manifest?.playlist?.id, query.data]);
+        if (query.isRefetching) {
+            console.log("[useDeviceManifest] 🔄 Refetching manifest...");
+        }
+    }, [query.isFetching, query.isRefetching]);
 
     return {
         ...query,
