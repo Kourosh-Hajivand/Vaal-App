@@ -444,56 +444,87 @@ export const Advertisement: React.FC = () => {
         const hasPendingItems = failedItems.length > 0 || notDownloadedItems.length > 0;
         const isRetrying = hasPendingItems && !currentDownloadingItem;
 
+        // اگر کش نداریم و آنلاین هم نیستیم → نمایش fallback
+        const hasNoCacheAndOffline = totalItems > 0 && readyCount === 0 && !isOnline && !currentDownloadingItem && !hasPendingItems;
+
+        // اگر کش نداریم اما آنلاین هستیم → نمایش loading با پیام دانلود
+        const hasNoCacheButOnline = totalItems > 0 && readyCount === 0 && isOnline && !currentDownloadingItem;
+
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingContent}>
-                    <ActivityIndicator size="large" color={isRetrying ? "#FFA726" : "#4CAF50"} />
-                    <Text style={styles.loadingText}>
-                        {isRetrying
-                            ? "در حال تلاش مجدد برای دانلود..."
-                            : totalItems > 0
-                              ? "در حال دانلود محتوا..."
-                              : "در انتظار محتوا..."}
-                    </Text>
-                    {totalItems > 0 && (
+                    {/* اگر کش نداریم و آفلاین هستیم → نمایش fallback image */}
+                    {hasNoCacheAndOffline ? (
                         <>
-                            <Text style={styles.loadingProgress}>
-                                {readyCount} از {totalItems} آماده
-                            </Text>
-                            {/* Progress Bar کلی */}
-                            <View style={styles.progressBar}>
-                                <View style={[styles.progressFill, { width: `${percentage}%` }]} />
+                            <Image 
+                                source={require("../../../assets/images/fallback-advertisement.png")} 
+                                style={styles.fallbackImageInLoading} 
+                                contentFit="cover" 
+                                transition={300} 
+                            />
+                            <View style={styles.offlineMessageContainer}>
+                                <Text style={styles.offlineMessageTitle}>🔴 آفلاین</Text>
+                                <Text style={styles.offlineMessageText}>
+                                    برای نمایش محتوا نیاز به اتصال اینترنت دارید
+                                </Text>
+                                <Text style={styles.offlineMessageSubtext}>
+                                    {totalItems} آیتم در انتظار دانلود
+                                </Text>
                             </View>
-                            <Text style={styles.loadingPercentage}>{percentage}%</Text>
-
-                            {/* نمایش آیتم در حال دانلود */}
-                            {currentDownloadingItem ? (
-                                <View style={styles.downloadingItemContainer}>
-                                    <Text style={styles.downloadingItemTitle}>
-                                        {currentDownloadingItem.type === "video" ? "📹" : "🖼️"} {currentDownloadingItem.title || "محتوا"}
+                        </>
+                    ) : (
+                        <>
+                            <ActivityIndicator size="large" color={isRetrying ? "#FFA726" : "#4CAF50"} />
+                            <Text style={styles.loadingText}>
+                                {hasNoCacheButOnline
+                                    ? "در حال دانلود محتوا برای اولین بار..."
+                                    : isRetrying
+                                      ? "در حال تلاش مجدد برای دانلود..."
+                                      : totalItems > 0
+                                        ? "در حال دانلود محتوا..."
+                                        : "در انتظار محتوا..."}
+                            </Text>
+                            {totalItems > 0 && (
+                                <>
+                                    <Text style={styles.loadingProgress}>
+                                        {readyCount} از {totalItems} آماده
                                     </Text>
-                                    <View style={styles.downloadingItemProgressBar}>
-                                        <View style={[styles.downloadingItemProgressFill, { width: `${currentDownloadProgress}%` }]} />
+                                    {/* Progress Bar کلی */}
+                                    <View style={styles.progressBar}>
+                                        <View style={[styles.progressFill, { width: `${percentage}%` }]} />
                                     </View>
-                                    <Text style={styles.downloadingItemPercentage}>{currentDownloadProgress}%</Text>
-                                </View>
-                            ) : hasPendingItems ? (
-                                <View style={styles.downloadingItemContainer}>
-                                    <Text style={styles.downloadingItemTitle}>
-                                        ⏳ در انتظار اتصال اینترنت...
-                                    </Text>
-                                    {failedItems.length > 0 && (
-                                        <Text style={styles.retryInfo}>
-                                            {failedItems.length} آیتم در انتظار تلاش مجدد
-                                        </Text>
-                                    )}
-                                    {notDownloadedItems.length > 0 && (
-                                        <Text style={styles.retryInfo}>
-                                            {notDownloadedItems.length} آیتم در انتظار دانلود
-                                        </Text>
-                                    )}
-                                </View>
-                            ) : null}
+                                    <Text style={styles.loadingPercentage}>{percentage}%</Text>
+
+                                    {/* نمایش آیتم در حال دانلود */}
+                                    {currentDownloadingItem ? (
+                                        <View style={styles.downloadingItemContainer}>
+                                            <Text style={styles.downloadingItemTitle}>
+                                                {currentDownloadingItem.type === "video" ? "📹" : "🖼️"} {currentDownloadingItem.title || "محتوا"}
+                                            </Text>
+                                            <View style={styles.downloadingItemProgressBar}>
+                                                <View style={[styles.downloadingItemProgressFill, { width: `${currentDownloadProgress}%` }]} />
+                                            </View>
+                                            <Text style={styles.downloadingItemPercentage}>{currentDownloadProgress}%</Text>
+                                        </View>
+                                    ) : hasPendingItems ? (
+                                        <View style={styles.downloadingItemContainer}>
+                                            <Text style={styles.downloadingItemTitle}>
+                                                ⏳ در انتظار اتصال اینترنت...
+                                            </Text>
+                                            {failedItems.length > 0 && (
+                                                <Text style={styles.retryInfo}>
+                                                    {failedItems.length} آیتم در انتظار تلاش مجدد
+                                                </Text>
+                                            )}
+                                            {notDownloadedItems.length > 0 && (
+                                                <Text style={styles.retryInfo}>
+                                                    {notDownloadedItems.length} آیتم در انتظار دانلود
+                                                </Text>
+                                            )}
+                                        </View>
+                                    ) : null}
+                                </>
+                            )}
                         </>
                     )}
                 </View>
@@ -763,6 +794,41 @@ const styles = StyleSheet.create({
         fontFamily: "YekanBakh-Regular",
         marginTop: 8,
         textAlign: "center",
+    },
+    fallbackImageInLoading: {
+        width: "100%",
+        height: "60%",
+        borderRadius: 14,
+        marginBottom: 20,
+    },
+    offlineMessageContainer: {
+        alignItems: "center",
+        marginTop: 20,
+        padding: 20,
+        backgroundColor: "rgba(244, 67, 54, 0.1)",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "rgba(244, 67, 54, 0.3)",
+    },
+    offlineMessageTitle: {
+        color: "#F44336",
+        fontSize: 20,
+        fontFamily: "YekanBakh-SemiBold",
+        marginBottom: 8,
+    },
+    offlineMessageText: {
+        color: "#fff",
+        fontSize: 14,
+        fontFamily: "YekanBakh-Regular",
+        textAlign: "center",
+        marginBottom: 4,
+    },
+    offlineMessageSubtext: {
+        color: "#aaa",
+        fontSize: 12,
+        fontFamily: "YekanBakh-Regular",
+        textAlign: "center",
+        marginTop: 8,
     },
     debugButton: {
         backgroundColor: "rgba(244, 67, 54, 0.3)",

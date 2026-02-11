@@ -12,6 +12,7 @@ import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
 import { AutoRefetchOnReconnect } from "./src/components/shared/AutoRefetchOnReconnect";
+import { useDeviceToken } from "./src/hooks/use-device-token";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
 
@@ -25,6 +26,16 @@ const queryClient = new QueryClient({
             retry: 2,
             staleTime: 1 * 60 * 1000, // 1 minute
             gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز — کش رو نگه دار برای آفلاین
+            // Global error handler برای 401
+            onError: (error) => {
+                const status = error?.response?.status;
+                if (status === 401) {
+                    console.log("❌ [QUERY] 401 error detected in query, token will be invalidated");
+                    // Token رو حذف می‌کنیم - App component خودش handle می‌کنه
+                    tokenService.remove().catch(() => {});
+                    pairCodeService.remove().catch(() => {});
+                }
+            },
         },
     },
 });
@@ -45,6 +56,9 @@ export default function App() {
         "Michroma-Regular": require("./assets/fonts/Michroma-Regular.ttf"),
     });
 
+    // Monitor token changes (reactive)
+    const { hasToken } = useDeviceToken();
+
     const [screen, setScreen] = useState("loading");
     const [isChecking, setIsChecking] = useState(true);
     const networkUnsubscribeRef = useRef(null);
@@ -61,6 +75,15 @@ export default function App() {
     useEffect(() => {
         screenRef.current = screen;
     }, [screen]);
+
+    // Monitor token changes - اگر token حذف شد (مثلاً بخاطر 401)، به OfflineScreen برو
+    useEffect(() => {
+        // اگر token نداریم و در Home هستیم، به OfflineScreen برو
+        if (!hasToken && screen === "home") {
+            console.log("❌ [APP] Token removed (likely due to 401), redirecting to OfflineScreen");
+            setScreen("offline");
+        }
+    }, [hasToken, screen]);
 
     // کیوسک برای کل اپ (نه فقط Home)
     useEffect(() => {

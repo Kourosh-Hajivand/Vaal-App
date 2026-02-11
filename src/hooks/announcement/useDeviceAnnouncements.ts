@@ -10,13 +10,23 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AnnouncementResource } from "@/src/types/api.types";
 
 const CACHE_KEY = "@device_announcements";
+const CACHE_TIMESTAMP_KEY = "@device_announcements_timestamp";
+
+interface CachedAnnouncements {
+    data: AnnouncementResource[];
+    timestamp: number; // timestamp آخرین fetch موفق
+}
 
 // Helper functions برای cache
-const loadCachedAnnouncements = async (): Promise<AnnouncementResource[] | null> => {
+const loadCachedAnnouncements = async (): Promise<{ data: AnnouncementResource[]; timestamp: number | null } | null> => {
     try {
         const cached = await AsyncStorage.getItem(CACHE_KEY);
+        const timestampStr = await AsyncStorage.getItem(CACHE_TIMESTAMP_KEY);
+        const timestamp = timestampStr ? parseInt(timestampStr, 10) : null;
+
         if (cached) {
-            return JSON.parse(cached);
+            const data = JSON.parse(cached);
+            return { data, timestamp };
         }
         return null;
     } catch (error) {
@@ -25,9 +35,13 @@ const loadCachedAnnouncements = async (): Promise<AnnouncementResource[] | null>
     }
 };
 
-const saveCachedAnnouncements = async (data: AnnouncementResource[]): Promise<void> => {
+const saveCachedAnnouncements = async (data: AnnouncementResource[], timestamp?: number): Promise<void> => {
     try {
         await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        // ذخیره timestamp آخرین fetch موفق
+        const fetchTimestamp = timestamp || Date.now();
+        await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, fetchTimestamp.toString());
+        console.log("[useDeviceAnnouncements] 💾 Saved cache with timestamp:", new Date(fetchTimestamp).toISOString());
     } catch (error) {
         console.error("[useDeviceAnnouncements] Error saving cache:", error);
     }
@@ -36,6 +50,7 @@ const saveCachedAnnouncements = async (data: AnnouncementResource[]): Promise<vo
 export const useDeviceAnnouncements = () => {
     const [hasToken, setHasToken] = useState(false);
     const cachedDataRef = useRef<AnnouncementResource[] | null>(null);
+    const cachedTimestampRef = useRef<number | null>(null); // timestamp آخرین fetch موفق از cache
     const [cacheLoaded, setCacheLoaded] = useState(false);
 
     // بلافاصله cached data رو لود کن (فقط یکبار)
@@ -44,8 +59,10 @@ export const useDeviceAnnouncements = () => {
             console.log("[useDeviceAnnouncements] 📂 Loading cached announcements...");
             const cached = await loadCachedAnnouncements();
             if (cached) {
-                console.log("[useDeviceAnnouncements] ✅ Cached announcements found:", cached.length);
-                cachedDataRef.current = cached;
+                console.log("[useDeviceAnnouncements] ✅ Cached announcements found:", cached.data.length);
+                console.log("[useDeviceAnnouncements] 📅 Cache timestamp:", cached.timestamp ? new Date(cached.timestamp).toISOString() : "N/A");
+                cachedDataRef.current = cached.data;
+                cachedTimestampRef.current = cached.timestamp;
             } else {
                 console.log("[useDeviceAnnouncements] ⚠️ No cached announcements");
             }
@@ -91,17 +108,24 @@ export const useDeviceAnnouncements = () => {
     useEffect(() => {
         if (query.data && !query.isPlaceholderData) {
             console.log("[useDeviceAnnouncements] 💾 Saving announcements to cache");
-            saveCachedAnnouncements(query.data);
+            const fetchTimestamp = query.dataUpdatedAt || Date.now();
+            saveCachedAnnouncements(query.data, fetchTimestamp);
             cachedDataRef.current = query.data;
+            cachedTimestampRef.current = fetchTimestamp;
         }
-    }, [query.data, query.isPlaceholderData]);
+    }, [query.data, query.isPlaceholderData, query.dataUpdatedAt]);
 
     // CRITICAL: اولویت با query.data (آخرین دیتا از server)
     const announcements = query.data || cachedDataRef.current || [];
 
+    // اگر از cache میخونیم و timestamp داریم، از اون استفاده کن
+    // در غیر این صورت از dataUpdatedAt استفاده کن
+    const effectiveDataUpdatedAt = query.dataUpdatedAt || cachedTimestampRef.current || null;
+
     return {
         ...query,
         data: announcements,
+        dataUpdatedAt: effectiveDataUpdatedAt, // override با timestamp از cache اگر query.data نداریم
         isLoadingCache: !cacheLoaded,
     };
 };
