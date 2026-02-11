@@ -6,7 +6,7 @@
  * - هر ویدیویی که دانلود شد، بلافاصله قابل نمایش میشه
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { View, StyleSheet, Text, ActivityIndicator } from "react-native";
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
 import { useDeviceManifest, useOnlineStatus } from "@/src/hooks";
 import { usePlaylistTimer } from "@/src/hooks/advertisement/usePlaylistTimer";
 import { useRadarSensor } from "@/src/hooks/advertisement/useRadarSensor";
@@ -45,10 +45,13 @@ export const Advertisement: React.FC = () => {
     const [isInitialized, setIsInitialized] = useState(false);
     const [localPaths, setLocalPaths] = useState<Map<string, string>>(new Map());
     const [downloadStatus, setDownloadStatus] = useState<Map<string, "downloading" | "ready" | "error">>(new Map());
+    const [downloadProgress, setDownloadProgress] = useState<Map<string, number>>(new Map()); // درصد دانلود هر آیتم
     const [retryCount, setRetryCount] = useState<Map<string, number>>(new Map());
     const [videoProgress, setVideoProgress] = useState(0);
     const [remainingTime, setRemainingTime] = useState(0);
-    // REMOVED: videoKey - no longer needed since we don't remount VideoPlayer
+    // Track play count برای هر ویدیو - وقتی advanceToNext صدا زده میشه، افزایش پیدا می‌کنه
+    // این باعث میشه که اگر همون ویدیو دوباره اومد (مثلاً تو لوپ)، دوباره mount بشه
+    const playCountRef = useRef<Map<string, number>>(new Map());
 
     // Track playlist ID to detect changes
     const currentPlaylistIdRef = useRef<string | null>(null);
@@ -93,6 +96,9 @@ export const Advertisement: React.FC = () => {
             setCurrentIndex(0);
             setLocalPaths(new Map());
             setDownloadStatus(new Map());
+            setDownloadProgress(new Map()); // reset progress
+            // Reset play count وقتی playlist تغییر کرد
+            playCountRef.current.clear();
         }
 
         // بلافاصله cached files رو شناسایی کن
@@ -107,22 +113,29 @@ export const Advertisement: React.FC = () => {
                 if (localPath) {
                     paths.set(item.id, localPath);
                     status.set(url, "ready");
-                } else {
-                    status.set(url, "downloading");
                 }
+                // اگر cache نداره، status رو set نکن - بذار retry mechanism تصمیم بگیره
             }
 
             setLocalPaths(paths);
-            setDownloadStatus(status);
+            // فقط status های ready رو set کن، بقیه رو نگه دار (برای حفظ error status)
+            setDownloadStatus((prev) => {
+                const newStatus = new Map(prev);
+                status.forEach((value, key) => {
+                    newStatus.set(key, value);
+                });
+                return newStatus;
+            });
 
             const needsDownload = contentItems.filter((item) => !paths.has(item.id));
-            if (needsDownload.length > 0) {
+            if (needsDownload.length > 0 && isOnline) {
+                // فقط اگر آنلاین هستیم، دانلود کن
                 downloadItemsProgressively(needsDownload);
             }
         };
 
         loadCachedFiles();
-    }, [manifest?.device_id, contentItems, isInitialized]);
+    }, [manifest?.device_id, contentItems, isInitialized, isOnline]);
 
     // Progressive download: هر ویدیو که دانلود شد، بلافاصله اضافه کن
     // ⚠️ هیچ وقت فایل‌های کش شده رو دوباره دانلود نمی‌کنیم
@@ -144,12 +157,22 @@ export const Advertisement: React.FC = () => {
                 }
 
                 setDownloadStatus((prev) => new Map(prev).set(url, "downloading"));
+                setDownloadProgress((prev) => new Map(prev).set(item.id, 0)); // شروع از 0%
+                console.log(`[Advertisement] 📥 Starting download: ${item.title || item.id} (${item.type})`);
 
                 const localPath = await cacheManager.cacheFile(
                     url,
                     item.type === "video" ? "video" : "image",
                     item.id,
                     updatedAt,
+                    (progress) => {
+                        // Update progress برای این آیتم
+                        setDownloadProgress((prev) => {
+                            const newProgress = new Map(prev);
+                            newProgress.set(item.id, Math.round(progress.percentage));
+                            return newProgress;
+                        });
+                    },
                 );
 
                 setLocalPaths((prev) => {
@@ -162,20 +185,37 @@ export const Advertisement: React.FC = () => {
                     newStatus.set(url, "ready");
                     return newStatus;
                 });
+                setDownloadProgress((prev) => {
+                    const newProgress = new Map(prev);
+                    newProgress.set(item.id, 100); // 100% وقتی آماده شد
+                    return newProgress;
+                });
             } catch (error) {
                 const currentRetries = retryCount.get(url) || 0;
-                setRetryCount((prev) => new Map(prev).set(url, currentRetries + 1));
+                const newRetryCount = currentRetries + 1;
+                setRetryCount((prev) => new Map(prev).set(url, newRetryCount));
                 setDownloadStatus((prev) => {
                     const newStatus = new Map(prev);
                     newStatus.set(url, "error");
                     return newStatus;
                 });
+                // Reset progress در صورت خطا
+                setDownloadProgress((prev) => {
+                    const newProgress = new Map(prev);
+                    newProgress.delete(item.id); // حذف progress در صورت خطا
+                    return newProgress;
+                });
+                console.warn(
+                    `[Advertisement] ❌ Download failed: ${item.title || item.id} (attempt ${newRetryCount}/5)`,
+                    error,
+                );
+                // اگر کمتر از 5 بار retry شده، بعداً دوباره تلاش می‌کنیم (در retry mechanism)
             }
         }
     };
 
     // ========================================================================
-    // RETRY MECHANISM: هر 10 ثانیه failed downloads رو دوباره امتحان کن
+    // RETRY MECHANISM: هر 10 ثانیه failed downloads و آیتم‌های دانلود نشده رو دوباره امتحان کن
     // ========================================================================
 
     useEffect(() => {
@@ -187,19 +227,32 @@ export const Advertisement: React.FC = () => {
 
         retryIntervalRef.current = setInterval(() => {
             const failedItems: ManifestContentItem[] = [];
+            const notDownloadedItems: ManifestContentItem[] = [];
 
             for (const item of contentItems) {
                 const url = item.file_url;
                 const status = downloadStatus.get(url);
                 const retries = retryCount.get(url) || 0;
+                const hasLocalPath = localPaths.has(item.id);
 
+                // آیتم‌هایی که error شده‌اند و کمتر از 5 بار retry شده‌اند
                 if (status === "error" && retries < 5) {
                     failedItems.push(item);
                 }
+                // آیتم‌هایی که هنوز دانلود نشده‌اند (نه ready هستند و نه downloading)
+                // اگر status نداره یا undefined هست، یعنی هنوز دانلود نشده
+                else if (!hasLocalPath && status !== "downloading" && status !== "ready") {
+                    notDownloadedItems.push(item);
+                }
             }
 
-            if (failedItems.length > 0) {
-                downloadItemsProgressively(failedItems);
+            // اول failed items رو retry کن، بعد not downloaded items
+            const itemsToDownload = [...failedItems, ...notDownloadedItems];
+            if (itemsToDownload.length > 0) {
+                console.log(
+                    `[Advertisement] 🔄 Retrying ${itemsToDownload.length} items (${failedItems.length} failed, ${notDownloadedItems.length} not downloaded)`,
+                );
+                downloadItemsProgressively(itemsToDownload);
             }
         }, 10 * 1000);
 
@@ -208,7 +261,7 @@ export const Advertisement: React.FC = () => {
                 clearInterval(retryIntervalRef.current);
             }
         };
-    }, [manifest?.device_id, contentItems, downloadStatus, retryCount, isOnline]);
+    }, [manifest?.device_id, contentItems, downloadStatus, retryCount, isOnline, localPaths]);
 
     // ========================================================================
     // 3. AUTO-PLAY: سنسور optional است
@@ -252,6 +305,12 @@ export const Advertisement: React.FC = () => {
     const advanceToNext = useCallback(() => {
         if (!readyItems.length) {
             return;
+        }
+
+        // افزایش play count برای ویدیو فعلی
+        if (currentItem?.id) {
+            const currentCount = playCountRef.current.get(currentItem.id) || 0;
+            playCountRef.current.set(currentItem.id, currentCount + 1);
         }
 
         const nextIndex = (currentIndex + 1) % readyItems.length;
@@ -355,21 +414,86 @@ export const Advertisement: React.FC = () => {
         const readyCount = readyItems.length;
         const percentage = totalItems > 0 ? Math.round((readyCount / totalItems) * 100) : 0;
 
+        // پیدا کردن آیتمی که در حال دانلود است
+        const downloadingItems = contentItems.filter((item) => {
+            const status = downloadStatus.get(item.file_url);
+            return status === "downloading";
+        });
+
+        // پیدا کردن آیتم‌های failed
+        const failedItems = contentItems.filter((item) => {
+            const status = downloadStatus.get(item.file_url);
+            const retries = retryCount.get(item.file_url) || 0;
+            return status === "error" && retries < 5;
+        });
+
+        // پیدا کردن آیتم‌های که هنوز دانلود نشده‌اند
+        const notDownloadedItems = contentItems.filter((item) => {
+            const hasLocalPath = localPaths.has(item.id);
+            const status = downloadStatus.get(item.file_url);
+            return !hasLocalPath && status !== "downloading" && status !== "ready";
+        });
+
+        // اولین آیتم در حال دانلود
+        const currentDownloadingItem = downloadingItems[0];
+        const currentDownloadProgress = currentDownloadingItem
+            ? downloadProgress.get(currentDownloadingItem.id) || 0
+            : 0;
+
+        // اگر هیچ آیتمی در حال دانلود نیست اما آیتم‌های failed یا not downloaded وجود دارند
+        const hasPendingItems = failedItems.length > 0 || notDownloadedItems.length > 0;
+        const isRetrying = hasPendingItems && !currentDownloadingItem;
+
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingContent}>
-                    <ActivityIndicator size="large" color="#4CAF50" />
-                    <Text style={styles.loadingText}>{totalItems > 0 ? "در حال دانلود محتوا..." : "در انتظار محتوا..."}</Text>
+                    <ActivityIndicator size="large" color={isRetrying ? "#FFA726" : "#4CAF50"} />
+                    <Text style={styles.loadingText}>
+                        {isRetrying
+                            ? "در حال تلاش مجدد برای دانلود..."
+                            : totalItems > 0
+                              ? "در حال دانلود محتوا..."
+                              : "در انتظار محتوا..."}
+                    </Text>
                     {totalItems > 0 && (
                         <>
                             <Text style={styles.loadingProgress}>
                                 {readyCount} از {totalItems} آماده
                             </Text>
-                            {/* Progress Bar */}
+                            {/* Progress Bar کلی */}
                             <View style={styles.progressBar}>
                                 <View style={[styles.progressFill, { width: `${percentage}%` }]} />
                             </View>
                             <Text style={styles.loadingPercentage}>{percentage}%</Text>
+
+                            {/* نمایش آیتم در حال دانلود */}
+                            {currentDownloadingItem ? (
+                                <View style={styles.downloadingItemContainer}>
+                                    <Text style={styles.downloadingItemTitle}>
+                                        {currentDownloadingItem.type === "video" ? "📹" : "🖼️"} {currentDownloadingItem.title || "محتوا"}
+                                    </Text>
+                                    <View style={styles.downloadingItemProgressBar}>
+                                        <View style={[styles.downloadingItemProgressFill, { width: `${currentDownloadProgress}%` }]} />
+                                    </View>
+                                    <Text style={styles.downloadingItemPercentage}>{currentDownloadProgress}%</Text>
+                                </View>
+                            ) : hasPendingItems ? (
+                                <View style={styles.downloadingItemContainer}>
+                                    <Text style={styles.downloadingItemTitle}>
+                                        ⏳ در انتظار اتصال اینترنت...
+                                    </Text>
+                                    {failedItems.length > 0 && (
+                                        <Text style={styles.retryInfo}>
+                                            {failedItems.length} آیتم در انتظار تلاش مجدد
+                                        </Text>
+                                    )}
+                                    {notDownloadedItems.length > 0 && (
+                                        <Text style={styles.retryInfo}>
+                                            {notDownloadedItems.length} آیتم در انتظار دانلود
+                                        </Text>
+                                    )}
+                                </View>
+                            ) : null}
                         </>
                     )}
                 </View>
@@ -381,12 +505,13 @@ export const Advertisement: React.FC = () => {
         <View style={styles.container}>
             {currentItem.type === "video" ? (
                 <VideoPlayer
-                    // REMOVED: key prop - single instance handles URI changes via source prop
                     uri={localPath}
                     duration={currentItem.duration}
                     onEnded={advanceToNext}
                     isPaused={isPaused}
                     onProgress={handleVideoProgress}
+                    // Pass playCount برای ویدیوهای تکراری - بدون key برای جلوگیری از remount
+                    playCount={currentItem?.id ? (playCountRef.current.get(currentItem.id) || 0) : 0}
                 />
             ) : (
                 <ImageDisplay key={`${currentItem.id}-${currentIndex}`} uri={localPath || ""} />
@@ -422,7 +547,65 @@ export const Advertisement: React.FC = () => {
                     <Text style={styles.debugText}>
                         📦 Ready: {readyItems.length}/{contentItems.length}
                     </Text>
-                    {contentItems.length > readyItems.length && <Text style={styles.downloadingText}>⬇️ Downloading...</Text>}
+                    {contentItems.length > readyItems.length && (
+                        <>
+                            <Text style={styles.downloadingText}>⬇️ Downloading...</Text>
+                            {(() => {
+                                const downloadingItems = contentItems.filter((item) => {
+                                    const status = downloadStatus.get(item.file_url);
+                                    return status === "downloading";
+                                });
+                                const currentDownloadingItem = downloadingItems[0];
+                                const currentDownloadProgress = currentDownloadingItem
+                                    ? downloadProgress.get(currentDownloadingItem.id) || 0
+                                    : 0;
+                                if (currentDownloadingItem) {
+                                    return (
+                                        <>
+                                            <Text style={styles.debugText}>
+                                                📥 {currentDownloadingItem.title}: {currentDownloadProgress}%
+                                            </Text>
+                                        </>
+                                    );
+                                }
+                                return null;
+                            })()}
+                        </>
+                    )}
+                    <View style={styles.separator} />
+                    <TouchableOpacity
+                        style={styles.debugButton}
+                        onPress={async () => {
+                            Alert.alert(
+                                "پاک کردن Cache",
+                                "آیا مطمئن هستید که می‌خواهید تمام cache را پاک کنید؟",
+                                [
+                                    { text: "لغو", style: "cancel" },
+                                    {
+                                        text: "پاک کردن",
+                                        style: "destructive",
+                                        onPress: async () => {
+                                            try {
+                                                await cacheManager.clearCache();
+                                                setLocalPaths(new Map());
+                                                setDownloadStatus(new Map());
+                                                setDownloadProgress(new Map());
+                                                setIsInitialized(false);
+                                                // Reinitialize
+                                                await cacheManager.initialize();
+                                                setIsInitialized(true);
+                                                Alert.alert("✅", "Cache پاک شد. اپ را refresh کنید.");
+                                            } catch (error) {
+                                                Alert.alert("❌", `خطا: ${error}`);
+                                            }
+                                        },
+                                    },
+                                ],
+                            );
+                        }}
+                    >
+                        <Text style={styles.debugButtonText}>🗑️ پاک کردن Cache</Text>
+                    </TouchableOpacity>
                 </View>
             )}
         </View>
@@ -543,5 +726,56 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontFamily: "YekanBakh-Regular",
         marginTop: 3,
+    },
+    downloadingItemContainer: {
+        marginTop: 24,
+        width: "100%",
+        alignItems: "center",
+    },
+    downloadingItemTitle: {
+        color: "#fff",
+        fontSize: 14,
+        fontFamily: "YekanBakh-Regular",
+        marginBottom: 12,
+        textAlign: "center",
+    },
+    downloadingItemProgressBar: {
+        width: 200,
+        height: 4,
+        backgroundColor: "rgba(255,255,255,0.1)",
+        borderRadius: 2,
+        overflow: "hidden",
+    },
+    downloadingItemProgressFill: {
+        height: "100%",
+        backgroundColor: "#FFA726",
+        borderRadius: 2,
+    },
+    downloadingItemPercentage: {
+        color: "#FFA726",
+        fontSize: 12,
+        fontFamily: "YekanBakh-SemiBold",
+        marginTop: 6,
+    },
+    retryInfo: {
+        color: "#FFA726",
+        fontSize: 11,
+        fontFamily: "YekanBakh-Regular",
+        marginTop: 8,
+        textAlign: "center",
+    },
+    debugButton: {
+        backgroundColor: "rgba(244, 67, 54, 0.3)",
+        padding: 8,
+        borderRadius: 6,
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: "rgba(244, 67, 54, 0.5)",
+    },
+    debugButtonText: {
+        color: "#F44336",
+        fontSize: 11,
+        fontFamily: "YekanBakh-SemiBold",
+        textAlign: "center",
     },
 });

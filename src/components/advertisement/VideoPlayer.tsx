@@ -13,9 +13,10 @@ interface VideoPlayerProps {
     isPaused: boolean;
     onError?: (error: any) => void;
     onProgress?: (currentTime: number) => void; // برای نمایش countdown
+    playCount?: number; // تعداد دفعاتی که این ویدیو پخش شده (برای ویدیوهای تکراری)
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded, isPaused, onError, onProgress }) => {
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded, isPaused, onError, onProgress, playCount = 0 }) => {
     const videoRef = useRef<VideoRef>(null);
     const [hasEnded, setHasEnded] = useState(false);
     const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
@@ -23,25 +24,47 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     const pausedAtRef = useRef<number>(0);
     const elapsedBeforePauseRef = useRef<number>(0);
     const previousUriRef = useRef<string>("");
+    const previousPlayCountRef = useRef<number>(0);
+    const isReadyForDisplayRef = useRef<boolean>(false);
+    const [isPreparing, setIsPreparing] = useState(false); // برای pause کردن ویدیو تا آماده بشه
+    const hasSeekedRef = useRef<boolean>(false); // برای جلوگیری از seek مکرر
+    const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // برای clear کردن timeout seek
 
-    // Reset state when URI changes
+    // Reset state when URI changes or playCount changes (برای ویدیوهای تکراری)
     useEffect(() => {
-        if (previousUriRef.current !== uri) {
-            previousUriRef.current = uri;
+        const uriChanged = previousUriRef.current !== uri;
+        const playCountChanged = previousPlayCountRef.current !== playCount && playCount > 0;
+
+        if (uriChanged || playCountChanged) {
+            const wasDifferentUri = previousUriRef.current !== "";
+
+            if (uriChanged) {
+                previousUriRef.current = uri;
+            }
+            if (playCountChanged) {
+                previousPlayCountRef.current = playCount;
+            }
 
             // Reset all state
             setHasEnded(false);
             setHasStartedPlaying(false);
             elapsedBeforePauseRef.current = 0;
             pausedAtRef.current = 0;
+            isReadyForDisplayRef.current = false;
+            hasSeekedRef.current = false; // reset seek flag
+            setIsPreparing(true); // pause کن تا آماده بشه
 
             // Clear any existing timers
             if (durationTimerRef.current) {
                 clearTimeout(durationTimerRef.current);
                 durationTimerRef.current = null;
             }
+            if (seekTimeoutRef.current) {
+                clearTimeout(seekTimeoutRef.current);
+                seekTimeoutRef.current = null;
+            }
         }
-    }, [uri]);
+    }, [uri, playCount]);
 
     // Handle end callback - must be defined before useEffect that uses it
     const handleEnd = useCallback(() => {
@@ -68,8 +91,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
             durationTimerRef.current = null;
         }
 
-        // اگر ended شده یا duration نداریم یا هنوز پخش نشده، timer نزن
-        if (hasEnded || duration <= 0 || !hasStartedPlaying) {
+        // اگر ended شده یا duration نداریم یا هنوز پخش نشده یا در حال آماده‌سازی است، timer نزن
+        if (hasEnded || duration <= 0 || !hasStartedPlaying || isPreparing) {
             return;
         }
 
@@ -93,7 +116,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
 
         // Track elapsed time
         const trackingInterval = setInterval(() => {
-            if (!isPaused && hasStartedPlaying) {
+            if (!isPaused && !isPreparing && hasStartedPlaying) {
                 elapsedBeforePauseRef.current += 0.1;
             }
         }, 100);
@@ -105,35 +128,96 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
             }
             clearInterval(trackingInterval);
         };
-    }, [uri, duration, isPaused, hasEnded, hasStartedPlaying, handleEnd]);
+    }, [uri, duration, isPaused, isPreparing, hasEnded, hasStartedPlaying, handleEnd]);
 
     const handleError = (error: any) => {
         onError?.(error);
     };
 
+    // Handle video load start - وقتی ویدیو شروع به لود کردن کرد
+    const handleLoadStart = useCallback(() => {
+        if (previousUriRef.current === uri) {
+            isReadyForDisplayRef.current = false;
+            hasSeekedRef.current = false;
+            setIsPreparing(true); // pause کن تا آماده بشه
+        }
+    }, [uri]);
+
+    // Handle video load - وقتی ویدیو لود شد
+    const handleLoad = useCallback(() => {
+        // seek(0) رو بعد از onReadyForDisplay صدا بزن
+    }, []);
+
+    // Handle seek complete - وقتی seek کامل شد
+    const handleSeek = useCallback(
+        (data: { currentTime: number }) => {
+            if (previousUriRef.current === uri && hasSeekedRef.current && isPreparing) {
+                // اگر seek به 0 رسید، آماده‌سازی رو تمام کن
+                if (Math.abs(data.currentTime) < 0.1) {
+                    // Clear timeout قبلی
+                    if (seekTimeoutRef.current) {
+                        clearTimeout(seekTimeoutRef.current);
+                    }
+                    // یه تاخیر کوچک بده و بعد play کن
+                    seekTimeoutRef.current = setTimeout(() => {
+                        setIsPreparing(false);
+                        seekTimeoutRef.current = null;
+                    }, 50);
+                }
+            }
+        },
+        [uri, isPreparing],
+    );
+
+    // Handle ready for display - وقتی ویدیو آماده نمایش شد
+    const handleReadyForDisplay = useCallback(() => {
+        if (videoRef.current && previousUriRef.current === uri && !hasSeekedRef.current) {
+            isReadyForDisplayRef.current = true;
+            hasSeekedRef.current = true; // flag رو set کن تا دوباره seek نشه
+
+            // seek(0) کن
+            if (videoRef.current) {
+                videoRef.current.seek(0);
+            }
+        }
+    }, [uri]);
+
     // Track progress for countdown
-    const handleVideoProgress = useCallback((data: any) => {
-        // Check if URI has changed (prevent old video progress from affecting new video)
-        if (previousUriRef.current !== uri) {
-            return;
-        }
+    const handleVideoProgress = useCallback(
+        (data: any) => {
+            // Check if URI has changed (prevent old video progress from affecting new video)
+            if (previousUriRef.current !== uri) {
+                return;
+            }
 
-        // اگر ویدیو progress داره و pause نیست، یعنی واقعاً پخش شده
-        if (!isPaused && data.currentTime > 0 && !hasStartedPlaying) {
-            setHasStartedPlaying(true);
-            elapsedBeforePauseRef.current = 0;
-        }
+            // اگر در حال آماده‌سازی هستیم
+            if (isPreparing) {
+                // اگر currentTime بیشتر از 0.2 شد و هنوز در حال آماده‌سازی هستیم، یعنی seek کار نکرده
+                // در این صورت آماده‌سازی رو تمام کن
+                if (data.currentTime > 0.2) {
+                    setIsPreparing(false);
+                }
+                return;
+            }
 
-        // ⚠️ CRITICAL: اگر ویدیو به duration رسیده یا ازش گذشته، advance کن
-        if (!hasEnded && hasStartedPlaying && !isPaused && data.currentTime >= duration) {
-            handleEnd();
-            return;
-        }
+            // اگر ویدیو progress داره و pause نیست و آماده شده، یعنی واقعاً پخش شده
+            if (!isPaused && data.currentTime > 0 && !hasStartedPlaying) {
+                setHasStartedPlaying(true);
+                elapsedBeforePauseRef.current = 0;
+            }
 
-        if (onProgress && !isPaused && !hasEnded) {
-            onProgress(data.currentTime);
-        }
-    }, [uri, isPaused, hasStartedPlaying, hasEnded, duration, handleEnd, onProgress]);
+            // ⚠️ CRITICAL: اگر ویدیو به duration رسیده یا ازش گذشته، advance کن
+            if (!hasEnded && hasStartedPlaying && !isPaused && data.currentTime >= duration) {
+                handleEnd();
+                return;
+            }
+
+            if (onProgress && !isPaused && !hasEnded && !isPreparing) {
+                onProgress(data.currentTime);
+            }
+        },
+        [uri, isPaused, isPreparing, hasStartedPlaying, hasEnded, duration, handleEnd, onProgress],
+    );
 
     return (
         <View style={styles.container}>
@@ -143,13 +227,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
                 style={styles.video}
                 resizeMode="cover"
                 repeat={false}
-                paused={isPaused}
+                paused={isPaused || isPreparing} // pause کن تا آماده بشه
                 muted={false}
                 volume={1.0}
                 playInBackground={false}
                 playWhenInactive={false}
                 onEnd={handleEnd}
                 onError={handleError}
+                onLoadStart={handleLoadStart}
+                onLoad={handleLoad}
+                onReadyForDisplay={handleReadyForDisplay}
+                onSeek={handleSeek}
                 onProgress={handleVideoProgress}
                 ignoreSilentSwitch="ignore"
                 controls={false}
@@ -157,10 +245,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
                 posterResizeMode="cover"
                 progressUpdateInterval={250}
                 bufferConfig={{
-                    minBufferMs: 1000,
-                    maxBufferMs: 5000,
-                    bufferForPlaybackMs: 500,
-                    bufferForPlaybackAfterRebufferMs: 1000,
+                    minBufferMs: 2000, // افزایش buffer برای جلوگیری از لگ
+                    maxBufferMs: 10000, // افزایش max buffer
+                    bufferForPlaybackMs: 1000, // افزایش buffer قبل از شروع پخش
+                    bufferForPlaybackAfterRebufferMs: 2000,
                 }}
             />
         </View>
