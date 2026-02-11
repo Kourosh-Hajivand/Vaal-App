@@ -4,13 +4,16 @@
   "version": "1.0.1",
   "scripts": {
     "start": "expo start",
+    "start:clear": "expo start --clear",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "clean": "rm -rf node_modules/.cache && rm -rf .expo && rm -rf android/app/build && rm -rf android/.gradle && rm -rf android/build",
+    "clean:android": "cd android && ./gradlew clean && cd ..",
     "build:debug": "cd android && ./gradlew assembleDebug && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/debug/app-debug.apk'",
-    "build:release": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/release/app-release.apk'",
+    "build:release": "cd android && ./gradlew clean && ./gradlew assembleRelease && cd .. && echo '\n✅ APK Location: android/app/build/outputs/apk/release/app-release.apk'",
     "build:production": "eas build --profile production --platform android",
     "update:production": "eas update --branch production",
     "update:preview": "eas update --branch preview"

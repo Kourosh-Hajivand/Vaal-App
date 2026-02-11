@@ -71,4 +71,28 @@
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
+# Keep asset resources (weather icons, images, etc.)
+-keepclassmembers class **.R$* {
+    public static <fields>;
+}
+-dontwarn **.R$*
+
+# Keep asset loading classes
+-keep class com.facebook.react.bridge.** { *; }
+-keep class com.facebook.react.modules.** { *; }
+
+# Keep ImageSourcePropType and asset references
+-keep class * implements android.graphics.drawable.Drawable { *; }
+-keep class android.graphics.drawable.** { *; }
+
+# Keep all asset resources (weather icons, images, etc.)
+-keep class **.R$* {
+    public static <fields>;
+}
+-dontwarn **.R$*
+
+# Keep expo-image classes
+-keep class expo.modules.image.** { *; }
+-dontwarn expo.modules.image.**
+
 # Add any project specific keep options here:

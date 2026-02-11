@@ -59,18 +59,15 @@ export const useWeatherForecast = (options: UseWeatherForecastOptions = {}) => {
         networkMode: "offlineFirst",
         retry: 2,
         retryDelay: (i) => Math.min(1000 * 2 ** i, 10000),
-        placeholderData: () => cachedDataRef.current || undefined,
-        // وقتی آنلاین شد، refetch کن
-        refetchOnReconnect: true,
+        placeholderData: cachedDataRef.current || undefined, // حذف function wrapper
+        // غیرفعال کردن refetch خودکار - فقط manual refetch
+        refetchOnReconnect: false,
         refetchOnWindowFocus: false,
+        refetchInterval: false,
     });
 
-    // وقتی آنلاین شد و cache قدیمی، refetch کن
-    useEffect(() => {
-        if (isOnline && query.isStale && enabled) {
-            query.refetch();
-        }
-    }, [isOnline, query.isStale, enabled]);
+    // حذف useEffect برای refetch - فقط از refetchOnReconnect استفاده می‌کنیم
+    // این باعث میشه که query خودش وقتی online شد refetch کنه
 
     return {
         ...query,

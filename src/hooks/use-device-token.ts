@@ -49,7 +49,7 @@ export const useDeviceToken = () => {
             }
         };
 
-        // Polling: هر 2 ثانیه چک کن token تغییر کرده یا نه
+        // Polling: هر 500ms چک کن token تغییر کرده یا نه (برای react سریع‌تر)
         // در React Native از polling استفاده می‌کنیم (نه localStorage event)
         const checkInterval = setInterval(async () => {
             try {
@@ -60,7 +60,7 @@ export const useDeviceToken = () => {
             } catch {
                 // ignore errors
             }
-        }, 2000);
+        }, 500); // کاهش از 2000ms به 500ms برای react سریع‌تر
 
         return () => {
             clearInterval(checkInterval);

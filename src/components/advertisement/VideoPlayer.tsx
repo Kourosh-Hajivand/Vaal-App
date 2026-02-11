@@ -131,7 +131,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     }, [uri, duration, isPaused, isPreparing, hasEnded, hasStartedPlaying, handleEnd]);
 
     const handleError = (error: any) => {
-        onError?.(error);
+        console.error(`[VideoPlayer] ❌ Error playing video: ${uri}`, error);
+        
+        // اگر ویدیو corrupt شده یا format اشتباه، skip کن
+        const errorMessage = error?.error?.code || error?.error?.localizedDescription || String(error);
+        
+        if (errorMessage.includes('format') || errorMessage.includes('codec') || errorMessage.includes('corrupt')) {
+            console.warn(`[VideoPlayer] ⚠️ Video file appears corrupted, skipping to next...`);
+            // Skip به ویدیو بعدی
+            setTimeout(() => {
+                onEnded();
+            }, 500);
+        } else {
+            // سایر خطاها رو به parent component بده
+            onError?.(error);
+        }
     };
 
     // Handle video load start - وقتی ویدیو شروع به لود کردن کرد

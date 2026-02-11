@@ -5,12 +5,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { deviceService } from "@/src/services/device.service";
-import { tokenStorage } from "@/src/utils/token-storage";
+import { useDeviceToken } from "@/src/hooks/use-device-token";
+import { useOnlineStatus } from "@/src/hooks/use-online-status";
 import { loadLastDeviceData, saveLastDeviceData } from "@/src/utils/storage/playlistStorage";
 import type { ContactResource, DeviceAuthResponse } from "@/src/types/api.types";
 
 export const useDeviceInfo = () => {
-    const [hasToken, setHasToken] = useState(false);
+    const { hasToken } = useDeviceToken(); // استفاده از reactive hook
+    const { isOnline } = useOnlineStatus(); // برای چک کردن online بودن
     const cachedDataRef = useRef<DeviceAuthResponse | null>(null);
     const [cacheLoaded, setCacheLoaded] = useState(false);
 
@@ -26,11 +28,6 @@ export const useDeviceInfo = () => {
                 console.log("[useDeviceInfo] ⚠️ No cached device data");
             }
             setCacheLoaded(true);
-
-            // چک کردن token
-            const token = await tokenStorage.get();
-            setHasToken(!!token);
-            console.log("[useDeviceInfo] 🔑 Token:", token ? "EXISTS" : "NOT FOUND");
         };
 
         init();
@@ -45,7 +42,7 @@ export const useDeviceInfo = () => {
             return data;
         },
         enabled: hasToken && cacheLoaded,
-        staleTime: 10 * 1000, // 10 seconds
+        staleTime: 5 * 1000, // همیشه 5 ثانیه
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         retry: 3,
@@ -54,9 +51,9 @@ export const useDeviceInfo = () => {
         placeholderData: () => {
             return cachedDataRef.current || undefined;
         },
-        // هر 10 ثانیه refetch کن
-        refetchInterval: 10 * 1000,
-        refetchIntervalInBackground: true,
+        // همیشه هر 5 ثانیه refetch کن (در دیباگ و production)
+        refetchInterval: hasToken && isOnline ? 5 * 1000 : false,
+        refetchIntervalInBackground: false,
         // وقتی آنلاین شد، refetch کن
         refetchOnReconnect: true,
         refetchOnWindowFocus: false,
@@ -84,12 +81,8 @@ export const useDeviceInfo = () => {
 // Note: useDeviceContacts moved to src/hooks/device/useDeviceContacts.ts
 
 export const useRandomSnippet = (): { data: any; isLoading: boolean } => {
-    const [hasToken, setHasToken] = useState(false);
-
-    // چک کردن token
-    useEffect(() => {
-        tokenStorage.get().then((token) => setHasToken(!!token));
-    }, []);
+    const { hasToken } = useDeviceToken(); // استفاده از reactive hook
+    const { isOnline } = useOnlineStatus(); // برای چک کردن online بودن
 
     const query = useQuery({
         queryKey: ["device", "snippet", "random"],
@@ -100,12 +93,13 @@ export const useRandomSnippet = (): { data: any; isLoading: boolean } => {
             return data;
         },
         enabled: hasToken,
-        staleTime: 10 * 1000, // 10 seconds
+        staleTime: 5 * 1000, // همیشه 5 ثانیه
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         retry: 1,
-        // هر 5 دقیقه refetch کن برای snippet جدید
-        refetchInterval: 5 * 60 * 1000,
+        // همیشه هر 5 ثانیه refetch کن (در دیباگ و production)
+        refetchInterval: hasToken && isOnline ? 5 * 1000 : false,
+        refetchIntervalInBackground: false,
     });
 
     return {

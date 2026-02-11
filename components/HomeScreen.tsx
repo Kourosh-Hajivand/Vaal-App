@@ -56,7 +56,14 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
         // هر 5 دقیقه validation
         const interval = setInterval(validateToken, 5 * 60 * 1000);
 
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(interval);
+            // Cleanup tap timer
+            if (tapTimerRef.current) {
+                clearTimeout(tapTimerRef.current);
+                tapTimerRef.current = null;
+            }
+        };
     }, [onLogout]);
 
     // Triple Tap handler برای باز کردن Test Screen

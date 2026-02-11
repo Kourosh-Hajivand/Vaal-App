@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { StyleSheet, View, ActivityIndicator, StatusBar, Platform } from "react-native";
+import { StyleSheet, View, ActivityIndicator, StatusBar, Platform, AppState, Text } from "react-native";
 import { useFonts } from "expo-font";
 import * as NavigationBar from "expo-navigation-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -12,12 +12,20 @@ import { networkService, tokenService, deviceService } from "./src/services";
 import { getAndroidId } from "./src/services/androidId";
 import { pairCodeService } from "./src/services/pairCodeService";
 import { AutoRefetchOnReconnect } from "./src/components/shared/AutoRefetchOnReconnect";
+import { ErrorBoundary } from "./src/components/shared/ErrorBoundary";
+import { errorHandler } from "./src/utils/errorHandler";
 import { useDeviceToken } from "./src/hooks/use-device-token";
+import { clearAllCaches } from "./src/utils/cache/clearAllCaches";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
+// Import asset index برای اطمینان از bundle شدن همه asset ها در production
+import "./src/assets";
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
+
+// Initialize global error handler
+errorHandler.init();
 
 // Create QueryClient instance
 const queryClient = new QueryClient({
@@ -26,16 +34,7 @@ const queryClient = new QueryClient({
             retry: 2,
             staleTime: 1 * 60 * 1000, // 1 minute
             gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز — کش رو نگه دار برای آفلاین
-            // Global error handler برای 401
-            onError: (error) => {
-                const status = error?.response?.status;
-                if (status === 401) {
-                    console.log("❌ [QUERY] 401 error detected in query, token will be invalidated");
-                    // Token رو حذف می‌کنیم - App component خودش handle می‌کنه
-                    tokenService.remove().catch(() => {});
-                    pairCodeService.remove().catch(() => {});
-                }
-            },
+            // توکن در axios instance پاک می‌شه، اینجا نیازی به onError نیست
         },
     },
 });
@@ -63,6 +62,8 @@ export default function App() {
     const [isChecking, setIsChecking] = useState(true);
     const networkUnsubscribeRef = useRef(null);
     const screenRef = useRef("loading");
+    const appStateRef = useRef(AppState.currentState);
+    const wasInBackgroundRef = useRef(false);
 
     // Hide splash screen when fonts are loaded
     useEffect(() => {
@@ -84,6 +85,96 @@ export default function App() {
             setScreen("offline");
         }
     }, [hasToken, screen]);
+
+    // Monitor 401 errors directly in App.js برای redirect فوری
+    const hasRedirectedRef = useRef(false);
+    useEffect(() => {
+        const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+            // فقط events که query دارن رو چک کن
+            if ("query" in event && event.query?.state?.error) {
+                const error = event.query.state.error;
+                // Check if error has response property
+                const status = error && typeof error === "object" && "response" in error ? error.response?.status : null;
+
+                // اگر 401 بود و هنوز redirect نکردیم، فوری redirect کن
+                // توکن در axios instance پاک شده، cache ها رو هم پاک می‌کنیم
+                if (status === 401 && !hasRedirectedRef.current) {
+                    const currentScreen = screenRef.current;
+                    console.log(`❌ [APP] 401 error detected (current screen: ${currentScreen}) - clearing caches and redirecting...`);
+                    hasRedirectedRef.current = true;
+                    
+                    // Cancel تمام queryهای در حال اجرا
+                    queryClient.cancelQueries();
+                    // Remove تمام queries از cache تا enabled نشن
+                    queryClient.removeQueries();
+                    // Clear تمام React Query cache
+                    queryClient.clear();
+                    
+                    // پاک کردن تمام cache ها (media, device data, etc.)
+                    clearAllCaches().catch((error) => {
+                        console.error("❌ [APP] Error clearing caches:", error);
+                    });
+                    
+                    // فوری redirect کن (توکن در axios instance پاک شده)
+                    setScreen("offline");
+                    // Reset flag بعد از 3 ثانیه برای امکان redirect دوباره
+                    setTimeout(() => {
+                        hasRedirectedRef.current = false;
+                    }, 3000);
+                }
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, [queryClient]);
+
+    // Handle AppState changes (Background/Foreground)
+    useEffect(() => {
+        const subscription = AppState.addEventListener("change", async (nextAppState) => {
+            const wasBackground = appStateRef.current.match(/inactive|background/);
+            const isNowForeground = nextAppState === "active";
+
+            console.log(`[APP] AppState changed: ${appStateRef.current} → ${nextAppState}`);
+
+            // اگر از background به foreground اومدیم
+            if (wasBackground && isNowForeground) {
+                console.log("🔄 [APP] App came to foreground, checking status...");
+                wasInBackgroundRef.current = true;
+
+                // اگر در Home هستیم و token داریم، validate کن
+                if (screenRef.current === "home") {
+                    const token = await tokenService.get();
+                    if (token) {
+                        try {
+                            await deviceService.auth();
+                            console.log("✅ [APP] Token still valid after foreground");
+                        } catch (error) {
+                            if (error?.response?.status === 401) {
+                                console.log("❌ [APP] Token invalid after foreground, redirecting to OfflineScreen");
+                                await tokenService.remove();
+                                await pairCodeService.remove();
+                                setScreen("offline");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // اگر به background رفتیم
+            if (nextAppState.match(/inactive|background/)) {
+                console.log("📱 [APP] App went to background");
+                wasInBackgroundRef.current = true;
+            }
+
+            appStateRef.current = nextAppState;
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     // کیوسک برای کل اپ (نه فقط Home)
     useEffect(() => {
@@ -278,8 +369,17 @@ export default function App() {
         return (
             <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
-                    <AutoRefetchOnReconnect />
-                    <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
+                    <ErrorBoundary
+                        fallback={
+                            <View style={styles.errorContainer}>
+                                <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
+                                <Text style={styles.errorSubtext}>لطفاً برنامه را بسته و دوباره باز کنید</Text>
+                            </View>
+                        }
+                    >
+                        <AutoRefetchOnReconnect />
+                        <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
+                    </ErrorBoundary>
                 </ThemeProvider>
             </PersistQueryClientProvider>
         );
@@ -290,8 +390,17 @@ export default function App() {
         return (
             <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
                 <ThemeProvider>
-                    <AutoRefetchOnReconnect />
-                    <HomeScreen onLogout={handleLogout} />
+                    <ErrorBoundary
+                        fallback={
+                            <View style={styles.errorContainer}>
+                                <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
+                                <Text style={styles.errorSubtext}>لطفاً برنامه را بسته و دوباره باز کنید</Text>
+                            </View>
+                        }
+                    >
+                        <AutoRefetchOnReconnect />
+                        <HomeScreen onLogout={handleLogout} />
+                    </ErrorBoundary>
                 </ThemeProvider>
             </PersistQueryClientProvider>
         );
@@ -309,5 +418,26 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
+    },
+    errorContainer: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#000",
+        padding: 20,
+    },
+    errorText: {
+        color: "#F44336",
+        fontSize: 20,
+        fontFamily: "YekanBakh-SemiBold",
+        marginBottom: 10,
+        textAlign: "center",
+    },
+    errorSubtext: {
+        color: "#fff",
+        fontSize: 14,
+        fontFamily: "YekanBakh-Regular",
+        textAlign: "center",
+        opacity: 0.8,
     },
 });

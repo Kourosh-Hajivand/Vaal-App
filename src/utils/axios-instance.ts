@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { tokenStorage } from "./token-storage";
+import { pairCodeService } from "@/src/services/pairCodeService";
 
 // Base URL - باید از env variable استفاده بشه
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.EXPO_PUBLIC_API_URL || "https://api-vaal.pixlink.ir";
@@ -74,15 +75,16 @@ const formatErrorForLog = (error: AxiosError) => {
             exception?: string;
             [key: string]: unknown;
         }
-        const responseData = error.response.data as ErrorResponseData | undefined;
+        const response = error.response;
+        const responseData = response.data as ErrorResponseData | undefined;
         return {
             method,
             url: fullUrl,
             endpoint: url,
-            status: error.response.status,
-            statusText: error.response.statusText,
-            headers: error.response.headers,
-            data: error.response.data,
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            data: response.data,
             message: responseData?.message || responseData?.exception || error.message,
         };
     } else if (error.request) {
@@ -184,10 +186,56 @@ axiosInstance.interceptors.response.use(
             console.groupEnd();
         }
 
-        // اگر 401 بود - توکن دستگاه رو پاک نمیکنیم
-        // چون پاک کردنش باعث infinite loop میشه
+        // اگر 401 بود - توکن و pair code رو پاک کن و reject کن
         if (error.response?.status === 401) {
+            console.log("❌ [Axios] 401 Unauthorized - Removing token and pair code...");
+            // Token و pair code رو حذف می‌کنیم (async - بدون await برای جلوگیری از blocking)
+            tokenStorage.remove().catch(() => {});
+            pairCodeService.remove().catch(() => {});
             return Promise.reject(error);
+        }
+
+        // Handle server errors (500, 503, 504) - retry با exponential backoff
+        const status = error.response?.status;
+        if (status !== undefined && status >= 500 && status < 600) {
+            const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
+            
+            if (!originalRequest._retry) {
+                originalRequest._retry = true;
+                originalRequest._retryCount = 0;
+            }
+
+            originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
+
+            // Max 3 retries برای server errors
+            if (originalRequest._retryCount <= 3) {
+                const delay = Math.min(1000 * Math.pow(2, originalRequest._retryCount - 1), 10000); // Exponential backoff, max 10s
+                console.warn(`[Axios] Server error ${status}, retrying in ${delay}ms (attempt ${originalRequest._retryCount}/3)`);
+                
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                return axiosInstance(originalRequest);
+            }
+        }
+
+        // Handle network errors (timeout, no connection)
+        if (!error.response && error.request) {
+            const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
+            
+            if (!originalRequest._retry) {
+                originalRequest._retry = true;
+                originalRequest._retryCount = 0;
+            }
+
+            originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
+
+            // Max 2 retries برای network errors
+            if (originalRequest._retryCount <= 2) {
+                const delay = 2000 * originalRequest._retryCount; // Linear backoff: 2s, 4s
+                console.warn(`[Axios] Network error, retrying in ${delay}ms (attempt ${originalRequest._retryCount}/2)`);
+                
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                return axiosInstance(originalRequest);
+            }
         }
 
         return Promise.reject(error);

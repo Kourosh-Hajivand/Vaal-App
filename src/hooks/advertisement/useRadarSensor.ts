@@ -27,6 +27,8 @@ export const useRadarSensor = () => {
     const isConnectingRef = useRef(false);
     const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // برای setTimeout داخل interval
+    const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // برای setTimeout reconnect
     const lastDataTimeRef = useRef<number>(0);
     const mountedRef = useRef(true);
     const retryCountRef = useRef(0); // برای exponential backoff
@@ -154,10 +156,16 @@ export const useRadarSensor = () => {
                     // 📈 Exponential backoff: 2s, 4s, 8s, 16s, max 30s
                     const backoffDelay = Math.min(2000 * Math.pow(2, retryCountRef.current), 30000);
                     
-                    setTimeout(() => {
+                    // Clear previous retry timeout if exists
+                    if (retryTimeoutRef.current) {
+                        clearTimeout(retryTimeoutRef.current);
+                    }
+                    
+                    retryTimeoutRef.current = setTimeout(() => {
                         if (mountedRef.current && !isConnectingRef.current) {
                             attemptConnect();
                         }
+                        retryTimeoutRef.current = null;
                     }, backoffDelay);
                 }
             } else if (timeSinceLastData > 10000) {
@@ -174,11 +182,17 @@ export const useRadarSensor = () => {
                     isConnectingRef.current = false;
                     retryCountRef.current = 0; // Reset retry count
                     
+                    // Clear previous reconnect timeout if exists
+                    if (reconnectTimeoutRef.current) {
+                        clearTimeout(reconnectTimeoutRef.current);
+                    }
+                    
                     // بعد از 2 ثانیه دوباره connect کن
-                    setTimeout(() => {
+                    reconnectTimeoutRef.current = setTimeout(() => {
                         if (mountedRef.current) {
                             attemptConnect();
                         }
+                        reconnectTimeoutRef.current = null;
                     }, 2000);
                 }
             }
@@ -197,6 +211,14 @@ export const useRadarSensor = () => {
             if (retryIntervalRef.current) {
                 clearInterval(retryIntervalRef.current);
                 retryIntervalRef.current = null;
+            }
+            if (retryTimeoutRef.current) {
+                clearTimeout(retryTimeoutRef.current);
+                retryTimeoutRef.current = null;
+            }
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
             }
             
             // Remove callbacks

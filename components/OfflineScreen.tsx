@@ -5,6 +5,7 @@ import { networkService } from "@/src/services/networkService";
 import { pairCodeService } from "@/src/services/pairCodeService";
 import { tokenService } from "@/src/services/tokenService";
 import { formatIranTime, formatPersianDate } from "@/src/utils/dateUtils";
+import { images } from "@/src/assets";
 import React, { useEffect, useRef, useState } from "react";
 import { ImageBackground, StyleSheet, View, StatusBar, Animated } from "react-native";
 
@@ -283,7 +284,7 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
     };
 
     return (
-        <ImageBackground source={require("@/assets/OfflinePage.png")} style={styles.container} resizeMode="cover">
+        <ImageBackground source={images.offlinePage} style={styles.container} resizeMode="cover">
             <StatusBar hidden={true} />
             <View style={styles.safeArea}>
                 <View style={styles.content}>
@@ -299,7 +300,7 @@ export default function OfflineScreen({ onConnected }: OfflineScreenProps) {
 
                     {pairCode && (
                         <View style={styles.pairCodeContainer}>
-                            <CustomText size={32} weight="Regular" fontType="Michroma" style={{ letterSpacing: 4, lineHeight: 32 }}>
+                            <CustomText size={32} weight="Regular" fontType="Michroma" style={{ letterSpacing: 4, lineHeight: 32, color: "#FFFFFF" }}>
                                 {pairCode}
                             </CustomText>
                         </View>

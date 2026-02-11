@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deviceService } from "@/src/services/device.service";
 import { tokenStorage } from "@/src/utils/token-storage";
 import { useDeviceToken } from "../use-device-token";
+import { useOnlineStatus } from "../use-online-status";
 import { getGcTime, getStaleTime } from "@/src/utils/cache-config";
 import type { RegisterDeviceRequest, ActivateDeviceRequest, UpdateDeviceRequest } from "@/src/types/api.types";
 
@@ -125,22 +126,9 @@ export const useDeviceAnnouncements = (enabled: boolean = true) => {
         refetchOnReconnect: true,
         placeholderData: (previousData) => previousData,
         throwOnError: false,
-        refetchInterval: (query) => {
-            if (typeof navigator !== "undefined" && !navigator.onLine) {
-                return false;
-            }
-            if (!hasToken) {
-                return false;
-            }
-            if (query.state.error && query.state.data) {
-                return 10 * 1000;
-            }
-            if (query.state.error && !query.state.data) {
-                return 5 * 1000;
-            }
-            return 10 * 1000;
-        },
-        refetchIntervalInBackground: true,
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
+        refetchIntervalInBackground: false,
     });
 };
 
@@ -150,6 +138,7 @@ export const useDeviceAnnouncements = (enabled: boolean = true) => {
  */
 export const useDeviceManifest = () => {
     const { hasToken } = useDeviceToken();
+    const { isOnline } = useOnlineStatus();
     const queryClient = useQueryClient();
 
     // Force refetch وقتی hasToken تغییر کرد (fallback)
@@ -166,7 +155,10 @@ export const useDeviceManifest = () => {
     return useQuery({
         queryKey: deviceKeys.manifest(),
         queryFn: async () => {
-            return await deviceService.getManifest();
+            console.log("[useDeviceManifest] 🔄 Fetching manifest from server...");
+            const data = await deviceService.getManifest();
+            console.log("[useDeviceManifest] ✅ Got fresh manifest from server");
+            return data;
         },
         enabled: hasToken,
         retry: (failureCount, error: any) => {
@@ -178,16 +170,16 @@ export const useDeviceManifest = () => {
             }
             return failureCount < 5;
         },
-        staleTime: 10 * 1000, // 10 seconds
+        staleTime: 5 * 1000, // همیشه 5 ثانیه
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
-        placeholderData: (previousData) => previousData,
+        // حذف placeholderData تا data جدید همیشه نمایش داده بشه
         throwOnError: false,
-        // هر 10 ثانیه refetch کن
-        refetchInterval: 10 * 1000,
-        refetchIntervalInBackground: true,
+        // همیشه هر 5 ثانیه refetch کن (در دیباگ و production)
+        refetchInterval: hasToken && isOnline ? 5 * 1000 : false,
+        refetchIntervalInBackground: false,
     });
 };
 
@@ -207,15 +199,8 @@ export const useDeviceWeather = () => {
         staleTime: 60 * 1000,
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
-        refetchInterval: (query) => {
-            if (!hasToken) {
-                return false;
-            }
-            if (!query.state.data) {
-                return 10 * 1000;
-            }
-            return 10 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
 
@@ -243,21 +228,8 @@ export const useDeviceInfo = (enabled: boolean = true) => {
         networkMode: "offlineFirst",
         placeholderData: (previousData) => previousData,
         throwOnError: false,
-        refetchInterval: (query) => {
-            if (!hasToken) {
-                return false;
-            }
-            if (query.state.error && (query.state.error as any)?.response?.status === 401) {
-                return false;
-            }
-            if (query.state.error && query.state.data) {
-                return 10 * 1000;
-            }
-            if (!query.state.data) {
-                return 5 * 1000;
-            }
-            return 10 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
 
@@ -293,15 +265,8 @@ export const useDeviceEmergency = () => {
         staleTime: 5 * 60 * 1000,
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
-        refetchInterval: (query) => {
-            if (!hasToken) {
-                return false;
-            }
-            if (!query.state.data) {
-                return 10 * 1000;
-            }
-            return 2 * 60 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
 
@@ -324,18 +289,11 @@ export const useRandomSnippet = (enabled: boolean = true) => {
             }
             return failureCount < 3;
         },
-        staleTime: 0,
+        staleTime: 5 * 60 * 1000, // 5 minutes
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
-        refetchInterval: (query) => {
-            if (!hasToken) {
-                return false;
-            }
-            if (query.state.error && (query.state.error as any)?.response?.status === 401) {
-                return false;
-            }
-            return 30 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
 
@@ -355,12 +313,8 @@ export const useDeviceCategories = () => {
         staleTime: 5 * 60 * 1000,
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
-        refetchInterval: () => {
-            if (!hasToken) {
-                return false;
-            }
-            return 10 * 60 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
 
@@ -386,14 +340,7 @@ export const useDeviceContacts = (enabled: boolean = true) => {
         staleTime: 2 * 60 * 1000,
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
-        refetchInterval: (query) => {
-            if (!hasToken) {
-                return false;
-            }
-            if (query.state.error && (query.state.error as any)?.response?.status === 401) {
-                return false;
-            }
-            return 5 * 60 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };

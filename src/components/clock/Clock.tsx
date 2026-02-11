@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState, useMemo } from "react";
 import { View, StyleSheet, ActivityIndicator } from "react-native";
+import Animated, { FadeInRight, FadeOutLeft, Keyframe } from "react-native-reanimated";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
 import { Weather } from "./Weather";
@@ -175,7 +176,7 @@ export const Clock: React.FC = () => {
                         <>
                             <WeatherForecast enabled={true} />
                             {!isLoadingSnippet && randomSnippet && (randomSnippet.body || randomSnippet.text) && (
-                                <View style={styles.snippetContainer}>
+                                <Animated.View key={`snippet-${randomSnippet.id || randomSnippet.body || randomSnippet.text}`} entering={FadeInRight.duration(400).springify()} exiting={FadeOutLeft.duration(300)} style={styles.snippetContainer}>
                                     <View style={styles.snippetBubble}>
                                         <CustomText fontType="YekanBakh" weight="Regular" size={10} style={styles.snippetText}>
                                             {randomSnippet.body || randomSnippet.text || ""}
@@ -186,7 +187,7 @@ export const Clock: React.FC = () => {
                                             </Svg>
                                         </View>
                                     </View>
-                                </View>
+                                </Animated.View>
                             )}
                         </>
                     )}

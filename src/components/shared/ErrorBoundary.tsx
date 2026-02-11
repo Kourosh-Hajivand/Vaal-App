@@ -25,6 +25,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+        // Log error to global error handler
+        try {
+            const { errorHandler } = require('../../utils/errorHandler');
+            errorHandler.logError(error, false);
+        } catch (e) {
+            // Fallback if errorHandler not available
+            console.error('ErrorBoundary caught an error:', error, errorInfo);
+        }
+        
         if (__DEV__) {
             console.error('ErrorBoundary caught an error:', error, errorInfo);
         }

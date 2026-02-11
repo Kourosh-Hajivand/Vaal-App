@@ -13,6 +13,7 @@ import { useRadarSensor } from "@/src/hooks/advertisement/useRadarSensor";
 import { cacheManager } from "@/src/utils/cache/cacheManager";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageDisplay } from "./ImageDisplay";
+import { images } from "@/src/assets";
 import { Image } from "expo-image";
 import type { ManifestContentItem } from "@/src/types/api.types";
 
@@ -52,6 +53,11 @@ export const Advertisement: React.FC = () => {
     // Track play count برای هر ویدیو - وقتی advanceToNext صدا زده میشه، افزایش پیدا می‌کنه
     // این باعث میشه که اگر همون ویدیو دوباره اومد (مثلاً تو لوپ)، دوباره mount بشه
     const playCountRef = useRef<Map<string, number>>(new Map());
+    
+    // Concurrent downloads management
+    const MAX_CONCURRENT_DOWNLOADS = 2; // حداکثر 2 دانلود همزمان
+    const activeDownloadsRef = useRef<Set<string>>(new Set()); // URLs در حال دانلود
+    const downloadQueueRef = useRef<ManifestContentItem[]>([]); // Queue برای دانلودهای pending
 
     // Track playlist ID to detect changes
     const currentPlaylistIdRef = useRef<string | null>(null);
@@ -137,27 +143,55 @@ export const Advertisement: React.FC = () => {
         loadCachedFiles();
     }, [manifest?.device_id, contentItems, isInitialized, isOnline]);
 
-    // Progressive download: هر ویدیو که دانلود شد، بلافاصله اضافه کن
+    // Progressive download با concurrent download management
     // ⚠️ هیچ وقت فایل‌های کش شده رو دوباره دانلود نمی‌کنیم
     const downloadItemsProgressively = async (items: ManifestContentItem[]) => {
+        // اول چک کن کدوم‌ها cache شده‌اند
+        const itemsToDownload: ManifestContentItem[] = [];
+        
         for (const item of items) {
             const url = item.file_url;
-            const updatedAt = item.updated_at ?? "0"; // مقدار ثابت تا از re-download مکرر جلوگیری شود
+            const updatedAt = item.updated_at ?? "0";
+            const needsUpdate = cacheManager.needsUpdate(url, updatedAt);
+
+            if (!needsUpdate) {
+                const cachedPath = cacheManager.getCachedPath(url);
+                if (cachedPath) {
+                    setLocalPaths((prev) => new Map(prev).set(item.id, cachedPath));
+                    setDownloadStatus((prev) => new Map(prev).set(url, "ready"));
+                }
+                continue;
+            }
+
+            // اگر در حال دانلود است، skip کن
+            if (activeDownloadsRef.current.has(url)) {
+                continue;
+            }
+
+            itemsToDownload.push(item);
+        }
+
+        // Process downloads با rate limiting
+        const processDownload = async (item: ManifestContentItem) => {
+            const url = item.file_url;
+            const updatedAt = item.updated_at ?? "0";
+
+            // اگر در حال دانلود است، skip کن
+            if (activeDownloadsRef.current.has(url)) {
+                return;
+            }
+
+            // Check concurrent limit
+            if (activeDownloadsRef.current.size >= MAX_CONCURRENT_DOWNLOADS) {
+                downloadQueueRef.current.push(item);
+                return;
+            }
+
+            activeDownloadsRef.current.add(url);
 
             try {
-                const needsUpdate = cacheManager.needsUpdate(url, updatedAt);
-
-                if (!needsUpdate) {
-                    const cachedPath = cacheManager.getCachedPath(url);
-                    if (cachedPath) {
-                        setLocalPaths((prev) => new Map(prev).set(item.id, cachedPath));
-                        setDownloadStatus((prev) => new Map(prev).set(url, "ready"));
-                    }
-                    continue;
-                }
-
                 setDownloadStatus((prev) => new Map(prev).set(url, "downloading"));
-                setDownloadProgress((prev) => new Map(prev).set(item.id, 0)); // شروع از 0%
+                setDownloadProgress((prev) => new Map(prev).set(item.id, 0));
                 console.log(`[Advertisement] 📥 Starting download: ${item.title || item.id} (${item.type})`);
 
                 const localPath = await cacheManager.cacheFile(
@@ -166,7 +200,6 @@ export const Advertisement: React.FC = () => {
                     item.id,
                     updatedAt,
                     (progress) => {
-                        // Update progress برای این آیتم
                         setDownloadProgress((prev) => {
                             const newProgress = new Map(prev);
                             newProgress.set(item.id, Math.round(progress.percentage));
@@ -187,10 +220,15 @@ export const Advertisement: React.FC = () => {
                 });
                 setDownloadProgress((prev) => {
                     const newProgress = new Map(prev);
-                    newProgress.set(item.id, 100); // 100% وقتی آماده شد
+                    newProgress.set(item.id, 100);
                     return newProgress;
                 });
-            } catch (error) {
+                setRetryCount((prev) => {
+                    const newRetries = new Map(prev);
+                    newRetries.delete(url); // Reset retry count on success
+                    return newRetries;
+                });
+            } catch (error: any) {
                 const currentRetries = retryCount.get(url) || 0;
                 const newRetryCount = currentRetries + 1;
                 setRetryCount((prev) => new Map(prev).set(url, newRetryCount));
@@ -199,19 +237,52 @@ export const Advertisement: React.FC = () => {
                     newStatus.set(url, "error");
                     return newStatus;
                 });
-                // Reset progress در صورت خطا
                 setDownloadProgress((prev) => {
                     const newProgress = new Map(prev);
-                    newProgress.delete(item.id); // حذف progress در صورت خطا
+                    newProgress.delete(item.id);
                     return newProgress;
                 });
-                console.warn(
-                    `[Advertisement] ❌ Download failed: ${item.title || item.id} (attempt ${newRetryCount}/5)`,
-                    error,
-                );
-                // اگر کمتر از 5 بار retry شده، بعداً دوباره تلاش می‌کنیم (در retry mechanism)
+
+                // Handle specific errors
+                const errorMessage = error?.message || String(error);
+                if (errorMessage.includes('timeout')) {
+                    console.warn(`[Advertisement] ⏱️ Download timeout: ${item.title || item.id} (attempt ${newRetryCount}/10)`);
+                } else if (errorMessage.includes('Storage full') || errorMessage.includes('ENOSPC')) {
+                    console.warn(`[Advertisement] 💾 Storage full: ${item.title || item.id}`);
+                } else {
+                    console.warn(`[Advertisement] ❌ Download failed: ${item.title || item.id} (attempt ${newRetryCount}/10)`, error);
+                }
+
+                // Cancel download if timeout
+                if (errorMessage.includes('timeout')) {
+                    try {
+                        await cacheManager.cancelDownload(url);
+                    } catch (cancelError) {
+                        // Ignore cancel errors
+                    }
+                }
+            } finally {
+                activeDownloadsRef.current.delete(url);
+
+                // Process next item in queue
+                if (downloadQueueRef.current.length > 0 && activeDownloadsRef.current.size < MAX_CONCURRENT_DOWNLOADS) {
+                    const nextItem = downloadQueueRef.current.shift();
+                    if (nextItem) {
+                        processDownload(nextItem);
+                    }
+                }
             }
-        }
+        };
+
+        // Start downloads (up to MAX_CONCURRENT_DOWNLOADS)
+        const initialBatch = itemsToDownload.slice(0, MAX_CONCURRENT_DOWNLOADS);
+        const remainingItems = itemsToDownload.slice(MAX_CONCURRENT_DOWNLOADS);
+        downloadQueueRef.current.push(...remainingItems);
+
+        // Start initial batch
+        initialBatch.forEach((item) => {
+            processDownload(item);
+        });
     };
 
     // ========================================================================
@@ -235,9 +306,20 @@ export const Advertisement: React.FC = () => {
                 const retries = retryCount.get(url) || 0;
                 const hasLocalPath = localPaths.has(item.id);
 
-                // آیتم‌هایی که error شده‌اند و کمتر از 5 بار retry شده‌اند
-                if (status === "error" && retries < 5) {
-                    failedItems.push(item);
+                // آیتم‌هایی که error شده‌اند و کمتر از 10 بار retry شده‌اند
+                // با exponential backoff: بعد از 5 retry، فقط هر 30 ثانیه retry کن
+                if (status === "error") {
+                    if (retries < 5) {
+                        failedItems.push(item);
+                    } else if (retries < 10) {
+                        // Exponential backoff: فقط اگر آخرین retry بیشتر از 30 ثانیه پیش بوده
+                        const lastRetryTime = item.updated_at ? new Date(item.updated_at).getTime() : 0;
+                        const timeSinceLastRetry = Date.now() - lastRetryTime;
+                        if (timeSinceLastRetry > 30 * 1000) {
+                            failedItems.push(item);
+                        }
+                    }
+                    // بعد از 10 retry، skip کن (circuit breaker)
                 }
                 // آیتم‌هایی که هنوز دانلود نشده‌اند (نه ready هستند و نه downloading)
                 // اگر status نداره یا undefined هست، یعنی هنوز دانلود نشده
@@ -385,6 +467,60 @@ export const Advertisement: React.FC = () => {
         }
     }, [currentItem?.id, localPath, shouldPlay, isPaused]);
 
+    // 🛡️ GUARD: مطمئن شو که ویدیو در حال پخش است وقتی باید باشد
+    useEffect(() => {
+        // اگر سنسور نیست، همیشه play کن (Auto-Play Mode)
+        if (!isSensorConnected) {
+            if (isPaused) {
+                console.log("[Advertisement] 🛡️ Guard: سنسور نیست، auto-play فعال می‌شود");
+                setIsPaused(false);
+            }
+            return;
+        }
+
+        // اگر سنسور وصل است و presence تایید شده و ویدیو آماده است
+        if (isSensorConnected && isPresence && currentItem?.type === "video" && localPath) {
+            if (isPaused) {
+                console.log("[Advertisement] 🛡️ Guard: سنسور تایید شده و ویدیو آماده است، resume می‌کنم");
+                setIsPaused(false);
+            }
+        }
+    }, [isSensorConnected, isPresence, currentItem?.type, localPath, isPaused]);
+
+    // 🛡️ GUARD: Periodic check - هر 2 ثانیه چک کن که ویدیو در حال پخش است
+    const shouldPlayRef = useRef(shouldPlay);
+    const currentItemRef = useRef(currentItem);
+    const localPathRef = useRef(localPath);
+    
+    useEffect(() => {
+        shouldPlayRef.current = shouldPlay;
+        currentItemRef.current = currentItem;
+        localPathRef.current = localPath;
+    }, [shouldPlay, currentItem, localPath]);
+
+    useEffect(() => {
+        // فقط وقتی ویدیو داریم و نباید pause باشه
+        if (!currentItem || currentItem.type !== "video" || !localPath || !shouldPlay) {
+            return;
+        }
+
+        const guardInterval = setInterval(() => {
+            // استفاده از ref برای جلوگیری از stale closure
+            if (shouldPlayRef.current && currentItemRef.current?.type === "video" && localPathRef.current) {
+                // چک کن که آیا واقعاً pause شده یا نه
+                setIsPaused((currentPaused) => {
+                    if (currentPaused && shouldPlayRef.current) {
+                        console.log("[Advertisement] 🛡️ Guard (Periodic): ویدیو pause شده ولی باید play باشه، resume می‌کنم");
+                        return false;
+                    }
+                    return currentPaused;
+                });
+            }
+        }, 2000); // هر 2 ثانیه چک کن
+
+        return () => clearInterval(guardInterval);
+    }, [currentItem?.id, currentItem?.type, localPath, shouldPlay]);
+
     // ========================================================================
     // Render States
     // ========================================================================
@@ -393,7 +529,7 @@ export const Advertisement: React.FC = () => {
     if (!isLoading && !contentItems.length) {
         return (
             <View style={styles.fallbackContainer}>
-                <Image source={require("../../../assets/images/fallback-advertisement.png")} style={styles.fallbackImage} contentFit="cover" transition={300} />
+                <Image source={images.fallbackAdvertisement} style={styles.fallbackImage} contentFit="cover" transition={300} />
             </View>
         );
     }
@@ -457,7 +593,7 @@ export const Advertisement: React.FC = () => {
                     {hasNoCacheAndOffline ? (
                         <>
                             <Image 
-                                source={require("../../../assets/images/fallback-advertisement.png")} 
+                                source={images.fallbackAdvertisement} 
                                 style={styles.fallbackImageInLoading} 
                                 contentFit="cover" 
                                 transition={300} 

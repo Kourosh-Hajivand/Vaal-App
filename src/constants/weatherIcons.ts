@@ -11,30 +11,30 @@ export type WeatherIconSources = Partial<Record<WeatherCodeCategory, ImageSource
 
 /**
  * همه آیکون‌ها (dark + light) — require شده
+ * استفاده از asset index برای اطمینان از bundle شدن در production
  */
-const WEATHER_ICONS = {
-    // Dark theme
-    clear_dark: require("../../assets/weather/clear_dark.png"),
-    "partly-cloudy_dark": require("../../assets/weather/partly_cloudy_dark.png"),
-    cloudy_dark: require("../../assets/weather/cloudy_dark.png"),
-    fog_dark: require("../../assets/weather/fog_dark.png"),
-    drizzle_dark: require("../../assets/weather/drizzle_dark.png"),
-    rain_dark: require("../../assets/weather/rain_dark.png"),
-    snow_dark: require("../../assets/weather/snow_dark.png"),
-    thunderstorm_dark: require("../../assets/weather/thunderstorm_dark.png"),
-    unknown_dark: require("../../assets/weather/unknown_dark.png"),
+import { weatherIcons as WEATHER_ICONS_ASSETS } from "../assets";
 
-    // Light theme
-    clear_light: require("../../assets/weather/clear_light.png"),
-    "partly-cloudy_light": require("../../assets/weather/partly_cloudy_light.png"),
-    cloudy_light: require("../../assets/weather/cloudy_light.png"),
-    fog_light: require("../../assets/weather/fog_light.png"),
-    drizzle_light: require("../../assets/weather/drizzle_light.png"),
-    rain_light: require("../../assets/weather/rain_light.png"),
-    snow_light: require("../../assets/weather/snow_light.png"),
-    thunderstorm_light: require("../../assets/weather/thunderstorm_light.png"),
-    unknown_light: require("../../assets/weather/unknown_light.png"),
-} as const;
+const WEATHER_ICONS = WEATHER_ICONS_ASSETS as {
+    clear_dark: any;
+    "partly-cloudy_dark": any;
+    cloudy_dark: any;
+    fog_dark: any;
+    drizzle_dark: any;
+    rain_dark: any;
+    snow_dark: any;
+    thunderstorm_dark: any;
+    unknown_dark: any;
+    clear_light: any;
+    "partly-cloudy_light": any;
+    cloudy_light: any;
+    fog_light: any;
+    drizzle_light: any;
+    rain_light: any;
+    snow_light: any;
+    thunderstorm_light: any;
+    unknown_light: any;
+};
 
 /**
  * دریافت آیکون آب‌وهوا بر اساس دسته و تم

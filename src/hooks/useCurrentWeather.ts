@@ -46,17 +46,15 @@ export const useCurrentWeather = (options: { enabled?: boolean; staleTimeMs?: nu
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         retry: 1,
-        placeholderData: () => cachedDataRef.current || undefined,
-        refetchOnReconnect: true,
+        placeholderData: cachedDataRef.current || undefined, // حذف function wrapper
+        // غیرفعال کردن refetch خودکار - فقط manual refetch
+        refetchOnReconnect: false,
         refetchOnWindowFocus: false,
+        refetchInterval: false,
     });
 
-    // وقتی آنلاین شد و cache قدیمی، refetch کن
-    useEffect(() => {
-        if (isOnline && query.isStale && enabled) {
-            query.refetch();
-        }
-    }, [isOnline, query.isStale, enabled]);
+    // حذف useEffect برای refetch - فقط از refetchOnReconnect استفاده می‌کنیم
+    // این باعث میشه که query خودش وقتی online شد refetch کنه
 
     return {
         ...query,

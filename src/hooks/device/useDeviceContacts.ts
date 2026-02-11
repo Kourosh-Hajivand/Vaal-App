@@ -5,7 +5,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { deviceService } from "@/src/services/device.service";
-import { tokenStorage } from "@/src/utils/token-storage";
+import { useDeviceToken } from "@/src/hooks/use-device-token";
+import { useOnlineStatus } from "@/src/hooks/use-online-status";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ContactResource } from "@/src/types/api.types";
 
@@ -34,7 +35,8 @@ const saveCachedContacts = async (data: ContactResource[]): Promise<void> => {
 };
 
 export const useDeviceContacts = () => {
-    const [hasToken, setHasToken] = useState(false);
+    const { hasToken } = useDeviceToken(); // استفاده از reactive hook
+    const { isOnline } = useOnlineStatus(); // برای چک کردن online بودن
     const cachedDataRef = useRef<ContactResource[] | null>(null);
     const [cacheLoaded, setCacheLoaded] = useState(false);
 
@@ -50,11 +52,6 @@ export const useDeviceContacts = () => {
                 console.log("[useDeviceContacts] ⚠️ No cached contacts");
             }
             setCacheLoaded(true);
-
-            // چک کردن token
-            const token = await tokenStorage.get();
-            setHasToken(!!token);
-            console.log("[useDeviceContacts] 🔑 Token:", token ? "EXISTS" : "NOT FOUND");
         };
 
         init();
@@ -69,7 +66,7 @@ export const useDeviceContacts = () => {
             return contacts;
         },
         enabled: hasToken && cacheLoaded,
-        staleTime: 60 * 1000, // 1 minute
+        staleTime: 5 * 1000, // همیشه 5 ثانیه
         gcTime: 7 * 24 * 60 * 60 * 1000, // 7 روز
         networkMode: "offlineFirst",
         retry: 3,
@@ -78,9 +75,9 @@ export const useDeviceContacts = () => {
         placeholderData: () => {
             return cachedDataRef.current || undefined;
         },
-        // هر 1 دقیقه refetch کن
-        refetchInterval: 10 * 1000,
-        refetchIntervalInBackground: true,
+        // همیشه هر 5 ثانیه refetch کن (در دیباگ و production)
+        refetchInterval: hasToken && isOnline ? 5 * 1000 : false,
+        refetchIntervalInBackground: false,
     });
 
     // Save to cache when new data arrives از server

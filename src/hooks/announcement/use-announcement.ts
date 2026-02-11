@@ -24,14 +24,7 @@ export const useAnnouncement = (id: string, enabled = true) => {
         staleTime: 5 * 60 * 1000,
         placeholderData: (previousData) => previousData,
         throwOnError: false,
-        refetchInterval: (query) => {
-            if (query.state.error && query.state.data) {
-                return 60 * 1000;
-            }
-            if (!query.state.data) {
-                return 5 * 1000;
-            }
-            return 60 * 1000;
-        },
+        // غیرفعال کردن refetchInterval - فقط از staleTime استفاده می‌کنیم
+        refetchInterval: false, // کاملاً غیرفعال برای جلوگیری از infinite loop
     });
 };
