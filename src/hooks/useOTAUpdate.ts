@@ -8,6 +8,7 @@
  * - مناسب برای مانیتورهایی که دسترسی فیزیکی نداری
  */
 import { useEffect, useCallback, useRef, useState } from "react";
+import { AppState, type AppStateStatus, Platform } from "react-native";
 import * as Updates from "expo-updates";
 
 interface OTAUpdateState {
@@ -30,15 +31,26 @@ interface UseOTAUpdateOptions {
     autoApply?: boolean;
     /** فعال/غیرفعال — پیش‌فرض: true */
     enabled?: boolean;
+    /** تاخیر چک اولیه بعد از بالا آمدن اپ (ms) — پیش‌فرض: 10 ثانیه */
+    checkOnStartDelayMs?: number;
+    /** هر بار که اپ به Foreground می‌آید هم چک کند؟ — پیش‌فرض: true */
+    checkOnForeground?: boolean;
+    /** حداقل فاصله بین دو چک (ms) برای جلوگیری از spam — پیش‌فرض: 60 ثانیه */
+    minTimeBetweenChecksMs?: number;
 }
 
 const DEFAULT_CHECK_INTERVAL = 5 * 60 * 1000; // 5 دقیقه
+const DEFAULT_START_DELAY_MS = 10 * 1000;
+const DEFAULT_MIN_TIME_BETWEEN_CHECKS_MS = 60 * 1000;
 
 export const useOTAUpdate = (options: UseOTAUpdateOptions = {}) => {
     const {
         checkInterval = DEFAULT_CHECK_INTERVAL,
         autoApply = true,
         enabled = true,
+        checkOnStartDelayMs = DEFAULT_START_DELAY_MS,
+        checkOnForeground = true,
+        minTimeBetweenChecksMs = DEFAULT_MIN_TIME_BETWEEN_CHECKS_MS,
     } = options;
 
     const [state, setState] = useState<OTAUpdateState>({
@@ -50,16 +62,34 @@ export const useOTAUpdate = (options: UseOTAUpdateOptions = {}) => {
     });
 
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const busyRef = useRef(false);
+    const lastRunAtRef = useRef(0);
 
     /**
      * چک کردن آپدیت جدید + دانلود + اعمال
      */
     const checkAndApplyUpdate = useCallback(async () => {
+        if (Platform.OS === "web") return;
         // در development mode آپدیت کار نمی‌کنه
         if (__DEV__) {
             console.log("[OTA] ⚠️ Skipping update check in development mode");
             return;
         }
+
+        if (!Updates.isEnabled) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - lastRunAtRef.current < minTimeBetweenChecksMs) {
+            return;
+        }
+        if (busyRef.current) {
+            return;
+        }
+
+        busyRef.current = true;
+        lastRunAtRef.current = now;
 
         try {
             setState((prev) => ({ ...prev, isChecking: true, error: null }));
@@ -92,10 +122,8 @@ export const useOTAUpdate = (options: UseOTAUpdateOptions = {}) => {
 
                 if (autoApply) {
                     console.log("[OTA] 🔄 Applying update and reloading...");
-                    // کمی صبر کن تا state آپدیت بشه
-                    setTimeout(async () => {
-                        await Updates.reloadAsync();
-                    }, 1000);
+                    // درجا reload
+                    await Updates.reloadAsync();
                 }
             }
         } catch (error: any) {
@@ -108,8 +136,10 @@ export const useOTAUpdate = (options: UseOTAUpdateOptions = {}) => {
                 error: errorMessage,
                 lastCheckTime: new Date(),
             }));
+        } finally {
+            busyRef.current = false;
         }
-    }, [autoApply]);
+    }, [autoApply, minTimeBetweenChecksMs]);
 
     /**
      * اعمال دستی آپدیت (اگه autoApply غیرفعال باشه)
@@ -127,23 +157,33 @@ export const useOTAUpdate = (options: UseOTAUpdateOptions = {}) => {
     useEffect(() => {
         if (!enabled || __DEV__) return;
 
-        // چک اولیه با 10 ثانیه تاخیر (اپ باید اول لود بشه)
+        // چک اولیه (قابل تنظیم برای "درجا")
         const initialTimeout = setTimeout(() => {
             checkAndApplyUpdate();
-        }, 10 * 1000);
+        }, Math.max(0, checkOnStartDelayMs));
 
         // چک دوره‌ای
         intervalRef.current = setInterval(() => {
             checkAndApplyUpdate();
         }, checkInterval);
 
+        // هر بار برگشت به Foreground هم چک کن (برای مانیتورهای بدون دسترسی)
+        const subscription = checkOnForeground
+            ? AppState.addEventListener("change", (next: AppStateStatus) => {
+                  if (next === "active") {
+                      checkAndApplyUpdate();
+                  }
+              })
+            : null;
+
         return () => {
             clearTimeout(initialTimeout);
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);
             }
+            subscription?.remove?.();
         };
-    }, [enabled, checkInterval, checkAndApplyUpdate]);
+    }, [enabled, checkInterval, checkAndApplyUpdate, checkOnStartDelayMs, checkOnForeground]);
 
     return {
         ...state,

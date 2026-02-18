@@ -20,6 +20,7 @@ import { logService } from "./src/services/logService";
 import { logManager } from "./src/utils/logging/logManager";
 import { startMemoryPressureMonitor } from "./src/utils/memoryPressureMonitor";
 import { useDeviceInfo } from "./src/hooks/device/useDeviceInfo";
+import { useOTAUpdate } from "./src/hooks/useOTAUpdate";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
 // Import asset index برای اطمینان از bundle شدن همه asset ها در production
@@ -67,6 +68,16 @@ function AppContent() {
     // Monitor token changes (reactive)
     const { hasToken } = useDeviceToken();
     const { data: deviceData } = useDeviceInfo();
+
+    // OTA درجا: وقتی اپ باز است، آپدیت را سریع چک/دانلود/اعمال کن
+    useOTAUpdate({
+        enabled: true,
+        autoApply: true,
+        checkOnStartDelayMs: 0, // درجا بعد از بالا آمدن
+        checkOnForeground: true, // هر بار فعال شدن اپ
+        minTimeBetweenChecksMs: 60 * 1000, // جلوگیری از spam
+        checkInterval: 5 * 60 * 1000, // بکاپ: هر ۵ دقیقه هم چک کن
+    });
 
     // هرچه زودتر device_id را برای لاگ‌ها (مثلاً memory_critical) ست کن
     useEffect(() => {

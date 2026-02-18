@@ -133,7 +133,7 @@ export const Clock: React.FC = () => {
                 <View style={styles.mainContent}>
                     {/* Time - بدون ثانیه */}
                     <CustomText fontType="Michroma" weight="Regular" size={33}>
-                        {formatTimeWithoutSeconds(time)}س
+                        {formatTimeWithoutSeconds(time)}
                     </CustomText>
 
                     {/* Date & Weather */}
