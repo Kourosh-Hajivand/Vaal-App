@@ -5,6 +5,7 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { View, StyleSheet } from "react-native";
 import Video, { type VideoRef } from "react-native-video";
+import { logManager } from "@/src/utils/logging/logManager";
 
 interface VideoPlayerProps {
     uri: string;
@@ -33,7 +34,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     // Reset state when URI changes or playCount changes (برای ویدیوهای تکراری)
     useEffect(() => {
         const uriChanged = previousUriRef.current !== uri;
-        const playCountChanged = previousPlayCountRef.current !== playCount && playCount > 0;
+        // حذف شرط playCount > 0 تا حتی وقتی playCount از 0 به 1 تغییر می‌کند، reset شود
+        const playCountChanged = previousPlayCountRef.current !== playCount;
 
         if (uriChanged || playCountChanged) {
             const wasDifferentUri = previousUriRef.current !== "";
@@ -132,11 +134,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
 
     const handleError = (error: any) => {
         console.error(`[VideoPlayer] ❌ Error playing video: ${uri}`, error);
-        
+
         // اگر ویدیو corrupt شده یا format اشتباه، skip کن
         const errorMessage = error?.error?.code || error?.error?.localizedDescription || String(error);
-        
-        if (errorMessage.includes('format') || errorMessage.includes('codec') || errorMessage.includes('corrupt')) {
+
+        // لاگ خطای پخش
+        logManager.logError("playback", `Video playback error: ${errorMessage}`, error?.stack || error?.error?.stack, {
+            uri,
+            duration,
+            playCount,
+        });
+
+        if (errorMessage.includes("format") || errorMessage.includes("codec") || errorMessage.includes("corrupt")) {
             console.warn(`[VideoPlayer] ⚠️ Video file appears corrupted, skipping to next...`);
             // Skip به ویدیو بعدی
             setTimeout(() => {

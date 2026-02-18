@@ -1,8 +1,9 @@
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
 
 /**
  * Global Error Handler
  * Catches unhandled errors and promise rejections
+ * On fatal JS errors: auto-restart app (kiosk mode)
  */
 
 interface ErrorLog {
@@ -18,36 +19,47 @@ class ErrorHandler {
     init() {
         try {
             // Handle JavaScript errors
-            if (typeof ErrorUtils !== 'undefined' && ErrorUtils.getGlobalHandler) {
+            if (typeof ErrorUtils !== "undefined" && ErrorUtils.getGlobalHandler) {
                 const originalErrorHandler = ErrorUtils.getGlobalHandler();
-                
+
                 ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
                     try {
                         this.logError(error, isFatal);
                     } catch (e) {
-                        console.error('Error in error handler:', e);
+                        console.error("Error in error handler:", e);
                     }
-                    
+
+                    // Kiosk mode: auto-restart on fatal JS errors
+                    if (isFatal && Platform.OS !== "web") {
+                        try {
+                            const RNRestart = require("react-native-restart").default;
+                            RNRestart.restart();
+                            return;
+                        } catch (restartErr) {
+                            console.error("Failed to restart:", restartErr);
+                        }
+                    }
+
                     // Call original handler
                     if (originalErrorHandler) {
                         try {
                             originalErrorHandler(error, isFatal);
                         } catch (e) {
-                            console.error('Error in original error handler:', e);
+                            console.error("Error in original error handler:", e);
                         }
                     }
                 });
             }
 
-            console.log('✅ Error handler initialized');
+            console.log("✅ Error handler initialized");
         } catch (error) {
-            console.error('Failed to initialize error handler:', error);
+            console.error("Failed to initialize error handler:", error);
         }
     }
 
     logError(error: Error, isFatal?: boolean) {
         const errorLog: ErrorLog = {
-            message: error.message || 'Unknown error',
+            message: error.message || "Unknown error",
             stack: error.stack,
             timestamp: new Date().toISOString(),
             platform: Platform.OS,
@@ -56,7 +68,7 @@ class ErrorHandler {
         this.errorLogs.push(errorLog);
 
         // Log to console
-        console.error('🚨 Global Error:', {
+        console.error("🚨 Global Error:", {
             message: errorLog.message,
             isFatal,
             platform: errorLog.platform,
@@ -65,7 +77,7 @@ class ErrorHandler {
 
         // In production, you might want to send to crash reporting service
         // Example: Sentry.captureException(error);
-        
+
         // Keep only last 10 errors
         if (this.errorLogs.length > 10) {
             this.errorLogs.shift();
@@ -82,4 +94,3 @@ class ErrorHandler {
 }
 
 export const errorHandler = new ErrorHandler();
-

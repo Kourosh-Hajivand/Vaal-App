@@ -64,7 +64,8 @@ class PreloadManager {
 
                 if (needsUpdate) {
                     console.log(`[Preload] Downloading: ${item.title} (${item.type})`);
-                    await cacheManager.cacheFile(url, item.type === "video" ? "video" : "image", item.id.toString(), item.updated_at);
+                    const contentId = item.content_id || item.id || item.file_url || `item-${Date.now()}`;
+                    await cacheManager.cacheFile(url, item.type === "video" ? "video" : "image", String(contentId), item.updated_at);
                 } else {
                     console.log(`[Preload] Skipping (cached): ${item.title}`);
                 }

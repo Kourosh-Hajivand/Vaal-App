@@ -16,6 +16,8 @@ import { ErrorBoundary } from "./src/components/shared/ErrorBoundary";
 import { errorHandler } from "./src/utils/errorHandler";
 import { useDeviceToken } from "./src/hooks/use-device-token";
 import { clearAllCaches } from "./src/utils/cache/clearAllCaches";
+import { logService } from "./src/services/logService";
+import { logManager } from "./src/utils/logging/logManager";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
 // Import asset index برای اطمینان از bundle شدن همه asset ها در production
@@ -64,6 +66,8 @@ export default function App() {
     const screenRef = useRef("loading");
     const appStateRef = useRef(AppState.currentState);
     const wasInBackgroundRef = useRef(false);
+    const logSyncIntervalRef = useRef(null);
+    const lastSyncTimeRef = useRef(0);
 
     // Hide splash screen when fonts are loaded
     useEffect(() => {
@@ -256,7 +260,99 @@ export default function App() {
     // بررسی اولیه هنگام باز شدن اپ
     useEffect(() => {
         checkInitialStatus();
-    }, [checkInitialStatus]);
+        
+        // لاگ تستی برای نمایش عملکرد سیستم
+        if (hasToken) {
+            logManager.logDeviceStateChange("on", "active");
+            logManager.logError("other", "سیستم لاگ فعال شد - این یک لاگ تستی است", undefined, {
+                test: true,
+                timestamp: new Date().toISOString(),
+            });
+            console.log("✅ [LOG_SYSTEM] سیستم لاگ فعال شد و آماده دریافت لاگ‌ها است");
+        }
+    }, [checkInitialStatus, hasToken]);
+
+    // راه‌اندازی سرویس sync لاگ‌ها
+    useEffect(() => {
+        if (!hasToken) return;
+
+        // لاگ تستی برای نمایش عملکرد سیستم
+        (async () => {
+            try {
+                const stats = await logManager.getStats();
+                console.log("📊 [LOG_SYSTEM] سیستم لاگ فعال شد!");
+                console.log("📊 [LOG_SYSTEM] آمار لاگ‌ها:", {
+                    total_logs: stats?.total_logs || 0,
+                    pending_sync: stats?.pending_sync_count || 0,
+                    oldest_log: stats?.oldest_log_timestamp ? new Date(stats.oldest_log_timestamp).toLocaleString("fa-IR") : "ندارد",
+                    newest_log: stats?.newest_log_timestamp ? new Date(stats.newest_log_timestamp).toLocaleString("fa-IR") : "ندارد",
+                });
+                
+                // نوشتن یک لاگ تستی
+                await logManager.logError("other", "سیستم لاگ فعال شد - این یک لاگ تستی است", undefined, {
+                    test: true,
+                    message: "سیستم لاگ با موفقیت راه‌اندازی شد",
+                    timestamp: new Date().toISOString(),
+                });
+                console.log("✅ [LOG_SYSTEM] لاگ تستی نوشته شد");
+            } catch (error) {
+                console.error("❌ [LOG_SYSTEM] خطا در راه‌اندازی:", error);
+            }
+        })();
+
+        const syncLogs = async () => {
+            try {
+                const isOnline = await networkService.isConnected();
+                if (isOnline) {
+                    const result = await logService.syncPendingLogs();
+                    if (result.success) {
+                        lastSyncTimeRef.current = Date.now();
+                        console.log(`✅ [LOG_SYNC] ${result.syncedCount} لاگ sync شد`);
+                    } else {
+                        console.log(`⚠️ [LOG_SYNC] خطا در sync: ${result.message || "نامشخص"}`);
+                    }
+                } else {
+                    console.log("📦 [LOG_SYNC] آفلاین - لاگ‌ها در دستگاه نگه داشته می‌شوند");
+                }
+            } catch (error) {
+                console.error("❌ [LOG_SYNC] خطا در sync:", error);
+            }
+        };
+
+        // Sync هر 10 دقیقه
+        logSyncIntervalRef.current = setInterval(() => {
+            syncLogs();
+        }, 10 * 60 * 1000); // 10 minutes
+
+        // Sync اولیه
+        syncLogs();
+
+        return () => {
+            if (logSyncIntervalRef.current) {
+                clearInterval(logSyncIntervalRef.current);
+            }
+        };
+    }, [hasToken]);
+
+    // Force flush لاگ‌ها قبل از بستن اپ
+    useEffect(() => {
+        const handleAppStateChange = (nextAppState) => {
+            if (nextAppState === "background" || nextAppState === "inactive") {
+                // Flush لاگ‌ها قبل از رفتن به background
+                logManager.flush().catch((error) => {
+                    console.error("[LOG_SYNC] Error flushing logs:", error);
+                });
+            }
+        };
+
+        const subscription = AppState.addEventListener("change", handleAppStateChange);
+
+        return () => {
+            subscription.remove();
+            // Flush نهایی
+            logManager.flush().catch(() => {});
+        };
+    }, []);
 
     // Subscribe to network changes
     useEffect(() => {
@@ -273,6 +369,13 @@ export default function App() {
                 // اگر در OfflineScreen هستیم، همونجا بمون
             } else {
                 // ✅ اینترنت وصل شد
+                // فوراً لاگ‌ها را sync کن
+                if (hasToken) {
+                    logService.syncPendingLogs().catch((error) => {
+                        console.error("[LOG_SYNC] Error syncing logs on reconnect:", error);
+                    });
+                }
+                
                 if (screenRef.current === "offline") {
                     console.log("🌐 [ONLINE] Internet connected, checking token...");
                     const token = await tokenService.get();
@@ -373,7 +476,7 @@ export default function App() {
                         fallback={
                             <View style={styles.errorContainer}>
                                 <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
-                                <Text style={styles.errorSubtext}>لطفاً برنامه را بسته و دوباره باز کنید</Text>
+                                <Text style={styles.errorSubtext}>در حال راه‌اندازی مجدد خودکار...</Text>
                             </View>
                         }
                     >
@@ -394,7 +497,7 @@ export default function App() {
                         fallback={
                             <View style={styles.errorContainer}>
                                 <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
-                                <Text style={styles.errorSubtext}>لطفاً برنامه را بسته و دوباره باز کنید</Text>
+                                <Text style={styles.errorSubtext}>در حال راه‌اندازی مجدد خودکار...</Text>
                             </View>
                         }
                     >

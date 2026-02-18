@@ -199,7 +199,7 @@ axiosInstance.interceptors.response.use(
         const status = error.response?.status;
         if (status !== undefined && status >= 500 && status < 600) {
             const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
-            
+
             if (!originalRequest._retry) {
                 originalRequest._retry = true;
                 originalRequest._retryCount = 0;
@@ -211,7 +211,7 @@ axiosInstance.interceptors.response.use(
             if (originalRequest._retryCount <= 3) {
                 const delay = Math.min(1000 * Math.pow(2, originalRequest._retryCount - 1), 10000); // Exponential backoff, max 10s
                 console.warn(`[Axios] Server error ${status}, retrying in ${delay}ms (attempt ${originalRequest._retryCount}/3)`);
-                
+
                 await new Promise((resolve) => setTimeout(resolve, delay));
                 return axiosInstance(originalRequest);
             }
@@ -220,7 +220,7 @@ axiosInstance.interceptors.response.use(
         // Handle network errors (timeout, no connection)
         if (!error.response && error.request) {
             const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
-            
+
             if (!originalRequest._retry) {
                 originalRequest._retry = true;
                 originalRequest._retryCount = 0;
@@ -232,7 +232,7 @@ axiosInstance.interceptors.response.use(
             if (originalRequest._retryCount <= 2) {
                 const delay = 2000 * originalRequest._retryCount; // Linear backoff: 2s, 4s
                 console.warn(`[Axios] Network error, retrying in ${delay}ms (attempt ${originalRequest._retryCount}/2)`);
-                
+
                 await new Promise((resolve) => setTimeout(resolve, delay));
                 return axiosInstance(originalRequest);
             }

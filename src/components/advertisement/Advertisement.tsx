@@ -6,16 +6,20 @@
  * - هر ویدیویی که دانلود شد، بلافاصله قابل نمایش میشه
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
-import { useDeviceManifest, useOnlineStatus } from "@/src/hooks";
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, Alert, Pressable, TouchableWithoutFeedback } from "react-native";
+import { useDeviceManifest, useOnlineStatus, useDeviceInfo } from "@/src/hooks";
 import { usePlaylistTimer } from "@/src/hooks/advertisement/usePlaylistTimer";
 import { useRadarSensor } from "@/src/hooks/advertisement/useRadarSensor";
 import { cacheManager } from "@/src/utils/cache/cacheManager";
+import { useLogging } from "@/src/hooks/logging/useLogging";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageDisplay } from "./ImageDisplay";
 import { images } from "@/src/assets";
 import { Image } from "expo-image";
 import type { ManifestContentItem } from "@/src/types/api.types";
+import { useDebugPanel } from "@/src/contexts/DebugPanelContext";
+import { useSystemMonitor } from "@/src/hooks/monitoring/useSystemMonitor";
+import { SystemMonitorPanel } from "@/src/components/monitoring/SystemMonitorPanel";
 
 // Extended type با duration محاسبه شده (برای display)
 interface DisplayContentItem {
@@ -39,8 +43,43 @@ interface DisplayContentItem {
 
 export const Advertisement: React.FC = () => {
     const { data: manifest, isLoading, error } = useDeviceManifest();
+    const { data: deviceData } = useDeviceInfo();
     const { isPresence, isConnected: isSensorConnected, distance, statusText } = useRadarSensor();
     const { isOnline, connectionType } = useOnlineStatus();
+    const { logContentPlay, logContentPause, logContentEnd, logContentDownload, logContentAdded, logPlaylistChange, logManifestChange, logError, getStats, getContentLogSummary, getSensorLogSummary, clearAllLogs } = useLogging();
+    const { isDebugPanelVisible, hideDebugPanel, showDebugPanel } = useDebugPanel();
+    // مانیتور RAM/FPS فقط وقتی پنل دیباگ باز است (کمتر overhead)
+    const systemSnapshot = useSystemMonitor(isDebugPanelVisible);
+
+    // Double tap detection for debug panel (hooks must run on every render — no early return before this)
+    const tapCountRef = useRef(0);
+    const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const DOUBLE_TAP_DELAY = 500;
+    const handleDoubleTapArea = useCallback(() => {
+        tapCountRef.current += 1;
+
+        if (tapTimerRef.current) {
+            clearTimeout(tapTimerRef.current);
+        }
+
+        if (tapCountRef.current === 2) {
+            console.log("🔧 Opening Debug Panel (Double Tap on Advertisement)");
+            showDebugPanel();
+            tapCountRef.current = 0;
+            return;
+        }
+
+        tapTimerRef.current = setTimeout(() => {
+            tapCountRef.current = 0;
+        }, DOUBLE_TAP_DELAY);
+    }, [showDebugPanel]);
+
+    // State برای نمایش آمار لاگ‌ها در حالت توسعه
+    const [logStats, setLogStats] = useState<any>(null);
+    const [contentLogSummary, setContentLogSummary] = useState<any>(null);
+
+    // Safe manifest - مطمئن شو که null نیست
+    const safeManifest = manifest || null;
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
@@ -53,7 +92,7 @@ export const Advertisement: React.FC = () => {
     // Track play count برای هر ویدیو - وقتی advanceToNext صدا زده میشه، افزایش پیدا می‌کنه
     // این باعث میشه که اگر همون ویدیو دوباره اومد (مثلاً تو لوپ)، دوباره mount بشه
     const playCountRef = useRef<Map<string, number>>(new Map());
-    
+
     // Concurrent downloads management
     const MAX_CONCURRENT_DOWNLOADS = 2; // حداکثر 2 دانلود همزمان
     const activeDownloadsRef = useRef<Set<string>>(new Set()); // URLs در حال دانلود
@@ -62,13 +101,40 @@ export const Advertisement: React.FC = () => {
     // Track playlist ID to detect changes
     const currentPlaylistIdRef = useRef<string | null>(null);
     const itemStartTimeRef = useRef<number>(0);
+    const contentAddedLoggedRef = useRef<Set<string>>(new Set()); // جلوگیری از لاگ تکراری content_added
     const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    // منبع محتوا: مستقیم از data.content
-    const contentItems = useMemo<ManifestContentItem[]>(() => manifest?.content ?? [], [manifest?.content]);
+    // Video playback monitoring - برای تشخیص عدم پخش ویدیو
+    const lastVideoProgressRef = useRef<number>(0);
+    const lastProgressUpdateTimeRef = useRef<number>(0);
+    const videoPlaybackRetryCountRef = useRef<Map<string, number>>(new Map()); // برای هر ویدیو تعداد retry
+    const videoPlaybackMonitorIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    // اگر سنسور وصل نیست، همیشه پخش کن (Auto-Play Mode)
-    const shouldPlay = !isSensorConnected || isPresence;
+    // منبع محتوا: مستقیم از data.content
+    const contentItems = useMemo<ManifestContentItem[]>(() => {
+        if (!safeManifest || !safeManifest.content) return [];
+        return Array.isArray(safeManifest.content) ? safeManifest.content : [];
+    }, [safeManifest?.content]);
+
+    // Helper function برای گرفتن ID آیتم (content_id اولویت دارد)
+    const getItemId = useCallback((item: ManifestContentItem): string => {
+        const id = item.content_id || item.id || item.file_url;
+        // مطمئن شو که همیشه یک string معتبر برمی‌گرداند
+        if (!id || (typeof id === "string" && id.trim() === "")) {
+            // اگر هیچکدوم نبود، از file_url استفاده کن یا یک fallback ID بساز
+            return item.file_url || `item-${Date.now()}`;
+        }
+        return String(id);
+    }, []);
+
+    // بررسی sensor_enabled از device data
+    const sensorEnabled = deviceData?.sensor_enabled ?? true; // به صورت پیش‌فرض true است (backward compatibility)
+
+    // منطق پخش:
+    // - اگر sensor_enabled false باشد → auto play (همیشه play)
+    // - اگر sensor_enabled true باشد اما سنسور وصل نیست → auto play
+    // - اگر sensor_enabled true باشد و سنسور وصل است → فقط وقتی presence باشد play
+    const shouldPlay = !sensorEnabled || !isSensorConnected || isPresence;
 
     // ========================================================================
     // 1. OFFLINE-FIRST: بلافاصله cache رو لود کن
@@ -85,6 +151,13 @@ export const Advertisement: React.FC = () => {
         };
 
         initCache();
+
+        // Cleanup tap timer on unmount
+        return () => {
+            if (tapTimerRef.current) {
+                clearTimeout(tapTimerRef.current);
+            }
+        };
     }, []); // فقط یکبار، مستقل از playlist
 
     // ========================================================================
@@ -94,17 +167,24 @@ export const Advertisement: React.FC = () => {
     useEffect(() => {
         if (!contentItems.length || !isInitialized) return;
 
-        const contentKey = manifest?.device_id ?? "content";
+        const contentKey = safeManifest?.device_id ?? "content";
 
         // اگر منبع عوض شد، reset کن
         if (currentPlaylistIdRef.current !== contentKey) {
             currentPlaylistIdRef.current = contentKey;
+            contentAddedLoggedRef.current.clear();
             setCurrentIndex(0);
             setLocalPaths(new Map());
             setDownloadStatus(new Map());
             setDownloadProgress(new Map()); // reset progress
             // Reset play count وقتی playlist تغییر کرد
             playCountRef.current.clear();
+
+            // لاگ تغییر manifest
+            logManifestChange("updated", {
+                manifestId: safeManifest?.device_id || undefined,
+                contentCount: contentItems.length,
+            });
         }
 
         // بلافاصله cached files رو شناسایی کن
@@ -115,10 +195,20 @@ export const Advertisement: React.FC = () => {
             for (const item of contentItems) {
                 const url = item.file_url;
                 const localPath = cacheManager.getCachedPath(url);
+                const itemId = getItemId(item);
 
                 if (localPath) {
-                    paths.set(item.id, localPath);
+                    paths.set(itemId, localPath);
                     status.set(url, "ready");
+                    // لاگ محتوای اضافه شده از cache - فقط یکبار per item
+                    if (!contentAddedLoggedRef.current.has(itemId)) {
+                        contentAddedLoggedRef.current.add(itemId);
+                        logContentAdded(itemId, {
+                            title: item.title,
+                            type: item.type === "video" ? "video" : "image",
+                            manifestId: safeManifest?.device_id || undefined,
+                        });
+                    }
                 }
                 // اگر cache نداره، status رو set نکن - بذار retry mechanism تصمیم بگیره
             }
@@ -133,7 +223,7 @@ export const Advertisement: React.FC = () => {
                 return newStatus;
             });
 
-            const needsDownload = contentItems.filter((item) => !paths.has(item.id));
+            const needsDownload = contentItems.filter((item) => !paths.has(getItemId(item)));
             if (needsDownload.length > 0 && isOnline) {
                 // فقط اگر آنلاین هستیم، دانلود کن
                 downloadItemsProgressively(needsDownload);
@@ -141,14 +231,14 @@ export const Advertisement: React.FC = () => {
         };
 
         loadCachedFiles();
-    }, [manifest?.device_id, contentItems, isInitialized, isOnline]);
+    }, [safeManifest?.device_id ?? "content", contentItems, isInitialized, isOnline, getItemId]);
 
     // Progressive download با concurrent download management
     // ⚠️ هیچ وقت فایل‌های کش شده رو دوباره دانلود نمی‌کنیم
     const downloadItemsProgressively = async (items: ManifestContentItem[]) => {
         // اول چک کن کدوم‌ها cache شده‌اند
         const itemsToDownload: ManifestContentItem[] = [];
-        
+
         for (const item of items) {
             const url = item.file_url;
             const updatedAt = item.updated_at ?? "0";
@@ -157,7 +247,8 @@ export const Advertisement: React.FC = () => {
             if (!needsUpdate) {
                 const cachedPath = cacheManager.getCachedPath(url);
                 if (cachedPath) {
-                    setLocalPaths((prev) => new Map(prev).set(item.id, cachedPath));
+                    const itemId = getItemId(item);
+                    setLocalPaths((prev) => new Map(prev).set(itemId, cachedPath));
                     setDownloadStatus((prev) => new Map(prev).set(url, "ready"));
                 }
                 continue;
@@ -190,27 +281,31 @@ export const Advertisement: React.FC = () => {
             activeDownloadsRef.current.add(url);
 
             try {
+                const itemId = getItemId(item);
                 setDownloadStatus((prev) => new Map(prev).set(url, "downloading"));
-                setDownloadProgress((prev) => new Map(prev).set(item.id, 0));
-                console.log(`[Advertisement] 📥 Starting download: ${item.title || item.id} (${item.type})`);
+                setDownloadProgress((prev) => new Map(prev).set(itemId, 0));
+                console.log(`[Advertisement] 📥 Starting download: ${item.title || itemId} (${item.type})`);
 
-                const localPath = await cacheManager.cacheFile(
-                    url,
-                    item.type === "video" ? "video" : "image",
-                    item.id,
-                    updatedAt,
-                    (progress) => {
-                        setDownloadProgress((prev) => {
-                            const newProgress = new Map(prev);
-                            newProgress.set(item.id, Math.round(progress.percentage));
-                            return newProgress;
-                        });
-                    },
-                );
+                // لاگ شروع دانلود
+                logContentDownload(itemId, {
+                    title: item.title,
+                    type: item.type === "video" ? "video" : "image",
+                    fileUrl: url,
+                    status: "started",
+                    progress: 0,
+                });
+
+                const localPath = await cacheManager.cacheFile(url, item.type === "video" ? "video" : "image", itemId, updatedAt, (progress) => {
+                    setDownloadProgress((prev) => {
+                        const newProgress = new Map(prev);
+                        newProgress.set(itemId, Math.round(progress.percentage));
+                        return newProgress;
+                    });
+                });
 
                 setLocalPaths((prev) => {
                     const newPaths = new Map(prev);
-                    newPaths.set(item.id, localPath);
+                    newPaths.set(itemId, localPath);
                     return newPaths;
                 });
                 setDownloadStatus((prev) => {
@@ -220,7 +315,7 @@ export const Advertisement: React.FC = () => {
                 });
                 setDownloadProgress((prev) => {
                     const newProgress = new Map(prev);
-                    newProgress.set(item.id, 100);
+                    newProgress.set(itemId, 100);
                     return newProgress;
                 });
                 setRetryCount((prev) => {
@@ -228,6 +323,23 @@ export const Advertisement: React.FC = () => {
                     newRetries.delete(url); // Reset retry count on success
                     return newRetries;
                 });
+
+                // لاگ تکمیل دانلود و اضافه شدن به لیست
+                logContentDownload(itemId, {
+                    title: item.title,
+                    type: item.type === "video" ? "video" : "image",
+                    fileUrl: url,
+                    status: "completed",
+                    progress: 100,
+                });
+                if (!contentAddedLoggedRef.current.has(itemId)) {
+                    contentAddedLoggedRef.current.add(itemId);
+                    logContentAdded(itemId, {
+                        title: item.title,
+                        type: item.type === "video" ? "video" : "image",
+                        manifestId: safeManifest?.device_id || undefined,
+                    });
+                }
             } catch (error: any) {
                 const currentRetries = retryCount.get(url) || 0;
                 const newRetryCount = currentRetries + 1;
@@ -237,24 +349,39 @@ export const Advertisement: React.FC = () => {
                     newStatus.set(url, "error");
                     return newStatus;
                 });
+                const itemId = getItemId(item);
                 setDownloadProgress((prev) => {
                     const newProgress = new Map(prev);
-                    newProgress.delete(item.id);
+                    newProgress.delete(itemId);
                     return newProgress;
                 });
 
                 // Handle specific errors
                 const errorMessage = error?.message || String(error);
-                if (errorMessage.includes('timeout')) {
-                    console.warn(`[Advertisement] ⏱️ Download timeout: ${item.title || item.id} (attempt ${newRetryCount}/10)`);
-                } else if (errorMessage.includes('Storage full') || errorMessage.includes('ENOSPC')) {
-                    console.warn(`[Advertisement] 💾 Storage full: ${item.title || item.id}`);
+                if (errorMessage.includes("timeout")) {
+                    console.warn(`[Advertisement] ⏱️ Download timeout: ${item.title || itemId} (attempt ${newRetryCount}/10)`);
+                } else if (errorMessage.includes("Storage full") || errorMessage.includes("ENOSPC")) {
+                    console.warn(`[Advertisement] 💾 Storage full: ${item.title || itemId}`);
                 } else {
-                    console.warn(`[Advertisement] ❌ Download failed: ${item.title || item.id} (attempt ${newRetryCount}/10)`, error);
+                    console.warn(`[Advertisement] ❌ Download failed: ${item.title || itemId} (attempt ${newRetryCount}/10)`, error);
                 }
 
+                // لاگ خطای دانلود
+                logContentDownload(itemId, {
+                    title: item.title,
+                    type: item.type === "video" ? "video" : "image",
+                    fileUrl: url,
+                    status: "failed",
+                    errorMessage: errorMessage,
+                });
+                logError("download", errorMessage, error?.stack, {
+                    contentId: itemId,
+                    contentTitle: item.title,
+                    retryCount: newRetryCount,
+                });
+
                 // Cancel download if timeout
-                if (errorMessage.includes('timeout')) {
+                if (errorMessage.includes("timeout")) {
                     try {
                         await cacheManager.cancelDownload(url);
                     } catch (cancelError) {
@@ -304,7 +431,8 @@ export const Advertisement: React.FC = () => {
                 const url = item.file_url;
                 const status = downloadStatus.get(url);
                 const retries = retryCount.get(url) || 0;
-                const hasLocalPath = localPaths.has(item.id);
+                const itemId = getItemId(item);
+                const hasLocalPath = localPaths.has(itemId);
 
                 // آیتم‌هایی که error شده‌اند و کمتر از 10 بار retry شده‌اند
                 // با exponential backoff: بعد از 5 retry، فقط هر 30 ثانیه retry کن
@@ -331,9 +459,7 @@ export const Advertisement: React.FC = () => {
             // اول failed items رو retry کن، بعد not downloaded items
             const itemsToDownload = [...failedItems, ...notDownloadedItems];
             if (itemsToDownload.length > 0) {
-                console.log(
-                    `[Advertisement] 🔄 Retrying ${itemsToDownload.length} items (${failedItems.length} failed, ${notDownloadedItems.length} not downloaded)`,
-                );
+                console.log(`[Advertisement] 🔄 Retrying ${itemsToDownload.length} items (${failedItems.length} failed, ${notDownloadedItems.length} not downloaded)`);
                 downloadItemsProgressively(itemsToDownload);
             }
         }, 10 * 1000);
@@ -343,7 +469,7 @@ export const Advertisement: React.FC = () => {
                 clearInterval(retryIntervalRef.current);
             }
         };
-    }, [manifest?.device_id, contentItems, downloadStatus, retryCount, isOnline, localPaths]);
+    }, [safeManifest?.device_id ?? "content", contentItems, downloadStatus, retryCount, isOnline, localPaths, getItemId]);
 
     // ========================================================================
     // 3. AUTO-PLAY: سنسور optional است
@@ -352,8 +478,13 @@ export const Advertisement: React.FC = () => {
     // Pause/Resume based on sensor
     useEffect(() => {
         const newPausedState = !shouldPlay;
+        const prevPaused = isPaused;
+
         setIsPaused(newPausedState);
     }, [shouldPlay, isPresence, isSensorConnected]);
+
+    // لاگ تغییر وضعیت pause/play (بعد از تعریف currentItem)
+    // این useEffect بعد از تعریف currentItem قرار می‌گیرد
 
     // ========================================================================
     // Current Item
@@ -361,8 +492,8 @@ export const Advertisement: React.FC = () => {
 
     // Get ready items (فقط آیتم‌هایی که localPath دارن)
     const readyItems = useMemo(() => {
-        return contentItems.filter((item) => localPaths.has(item.id));
-    }, [contentItems, localPaths.size]);
+        return contentItems.filter((item) => localPaths.has(getItemId(item)));
+    }, [contentItems, localPaths.size, getItemId]);
 
     // Get current item from ready items
     const currentItem: DisplayContentItem | null = useMemo(() => {
@@ -373,13 +504,14 @@ export const Advertisement: React.FC = () => {
         if (!item) return null;
 
         const itemDuration = item.duration_sec ?? 10;
+        const itemId = getItemId(item);
 
         return {
             ...item,
             media_url: item.file_url,
             duration: itemDuration,
             duration_sec: item.duration_sec,
-            id: item.id,
+            id: itemId,
         } as DisplayContentItem;
     }, [readyItems, currentIndex]);
 
@@ -389,19 +521,68 @@ export const Advertisement: React.FC = () => {
             return;
         }
 
-        // افزایش play count برای ویدیو فعلی
+        // افزایش play count برای ویدیو فعلی (قبل از محاسبه nextIndex)
         if (currentItem?.id) {
-            const currentCount = playCountRef.current.get(currentItem.id) || 0;
-            playCountRef.current.set(currentItem.id, currentCount + 1);
+            const itemId = currentItem.id;
+            if (itemId) {
+                const currentCount = playCountRef.current.get(itemId) || 0;
+                const newCount = currentCount + 1;
+                playCountRef.current.set(itemId, newCount);
+
+                // لاگ پایان پخش محتوا
+                logContentEnd(itemId, {
+                    title: currentItem.title,
+                    type: currentItem.type === "video" ? "video" : "image",
+                    playCount: newCount,
+                });
+            }
         }
 
         const nextIndex = (currentIndex + 1) % readyItems.length;
 
+        // اگر فقط یک آیتم داریم و nextIndex برابر currentIndex است،
+        // باید playCount را افزایش دهیم تا VideoPlayer دوباره mount شود
+        // این کار در بالا انجام شده است
+
+        // برای اطمینان از اینکه React تغییر را تشخیص می‌دهد،
+        // حتی اگر index تغییر نکرده باشد، state را update می‌کنیم
         setCurrentIndex(nextIndex);
         setVideoProgress(0);
         setRemainingTime(0);
         itemStartTimeRef.current = Date.now();
-    }, [currentIndex, readyItems.length, readyItems, currentItem?.id]);
+
+        // اگر فقط یک آیتم داریم، یک force update کوچک انجام می‌دهیم
+        // با تغییر دادن یک state که VideoPlayer از آن استفاده نمی‌کند
+        // اما این کار لازم نیست چون playCount تغییر می‌کند
+    }, [currentIndex, readyItems.length, readyItems, currentItem?.id, currentItem, logContentEnd]);
+
+    // لاگ تغییر وضعیت pause/play (بعد از تعریف currentItem)
+    useEffect(() => {
+        if (!currentItem?.id) return;
+
+        const newPausedState = !shouldPlay;
+        const prevPaused = isPaused;
+
+        if (prevPaused !== newPausedState) {
+            if (newPausedState) {
+                logContentPause(currentItem.id, {
+                    title: currentItem.title,
+                    type: currentItem.type === "video" ? "video" : "image",
+                    position: currentIndex,
+                });
+            } else {
+                // Resume - دوباره play log می‌کنیم
+                const playCount = playCountRef.current.get(currentItem.id) || 0;
+                logContentPlay(currentItem.id, {
+                    title: currentItem.title,
+                    type: currentItem.type === "video" ? "video" : "image",
+                    durationSec: currentItem.duration_sec,
+                    playCount: playCount + 1,
+                    position: currentIndex,
+                });
+            }
+        }
+    }, [shouldPlay, isPaused, currentItem?.id, currentItem, currentIndex, logContentPause, logContentPlay]);
 
     // Track item start time - برای ویدیو و عکس
     useEffect(() => {
@@ -409,7 +590,25 @@ export const Advertisement: React.FC = () => {
         itemStartTimeRef.current = Date.now();
         setVideoProgress(0);
         setRemainingTime(currentItem?.duration || 0);
-    }, [currentIndex, currentItem?.id]);
+
+        // لاگ شروع پخش محتوا
+        if (currentItem?.id) {
+            const playCount = playCountRef.current.get(currentItem.id) || 0;
+            logContentPlay(currentItem.id, {
+                title: currentItem.title,
+                type: currentItem.type === "video" ? "video" : "image",
+                durationSec: currentItem.duration_sec,
+                playCount: playCount + 1,
+                position: currentIndex,
+            });
+
+            // در حالت توسعه، آمار را به‌روزرسانی کن
+            if (__DEV__) {
+                getContentLogSummary(currentItem.id).then(setContentLogSummary);
+                getStats().then(setLogStats);
+            }
+        }
+    }, [currentIndex, currentItem?.id, currentItem, logContentPlay, getContentLogSummary, getStats]);
 
     // Update remaining time countdown - فقط وقتی ویدیو واقعاً پخش شده
     useEffect(() => {
@@ -443,12 +642,19 @@ export const Advertisement: React.FC = () => {
     const handleVideoProgress = useCallback(
         (currentTime: number) => {
             setVideoProgress(currentTime);
+            // Track progress برای مانیتورینگ
+            lastVideoProgressRef.current = currentTime;
+            lastProgressUpdateTimeRef.current = Date.now();
+            // Reset retry count وقتی progress داریم
+            if (currentItem?.id && currentTime > 0) {
+                videoPlaybackRetryCountRef.current.set(currentItem.id, 0);
+            }
         },
         [currentItem?.id, currentItem?.duration],
     );
 
     // Get local path for current item
-    const localPath = currentItem ? localPaths.get(currentItem.id.toString()) : null;
+    const localPath = currentItem?.id ? localPaths.get(currentItem.id) : null;
 
     // Auto-advance timer for images (video خودش timer داره)
     usePlaylistTimer({
@@ -469,29 +675,18 @@ export const Advertisement: React.FC = () => {
 
     // 🛡️ GUARD: مطمئن شو که ویدیو در حال پخش است وقتی باید باشد
     useEffect(() => {
-        // اگر سنسور نیست، همیشه play کن (Auto-Play Mode)
-        if (!isSensorConnected) {
-            if (isPaused) {
-                console.log("[Advertisement] 🛡️ Guard: سنسور نیست، auto-play فعال می‌شود");
-                setIsPaused(false);
-            }
-            return;
+        // اگر باید play کنه و pause است، resume کن
+        if (shouldPlay && isPaused && currentItem?.type === "video" && localPath) {
+            console.log("[Advertisement] 🛡️ Guard: باید play باشه، resume می‌کنم");
+            setIsPaused(false);
         }
-
-        // اگر سنسور وصل است و presence تایید شده و ویدیو آماده است
-        if (isSensorConnected && isPresence && currentItem?.type === "video" && localPath) {
-            if (isPaused) {
-                console.log("[Advertisement] 🛡️ Guard: سنسور تایید شده و ویدیو آماده است، resume می‌کنم");
-                setIsPaused(false);
-            }
-        }
-    }, [isSensorConnected, isPresence, currentItem?.type, localPath, isPaused]);
+    }, [shouldPlay, isSensorConnected, isPresence, currentItem?.type, localPath, isPaused]);
 
     // 🛡️ GUARD: Periodic check - هر 2 ثانیه چک کن که ویدیو در حال پخش است
     const shouldPlayRef = useRef(shouldPlay);
     const currentItemRef = useRef(currentItem);
     const localPathRef = useRef(localPath);
-    
+
     useEffect(() => {
         shouldPlayRef.current = shouldPlay;
         currentItemRef.current = currentItem;
@@ -565,16 +760,15 @@ export const Advertisement: React.FC = () => {
 
         // پیدا کردن آیتم‌های که هنوز دانلود نشده‌اند
         const notDownloadedItems = contentItems.filter((item) => {
-            const hasLocalPath = localPaths.has(item.id);
+            const itemId = getItemId(item);
+            const hasLocalPath = localPaths.has(itemId);
             const status = downloadStatus.get(item.file_url);
             return !hasLocalPath && status !== "downloading" && status !== "ready";
         });
 
         // اولین آیتم در حال دانلود
         const currentDownloadingItem = downloadingItems[0];
-        const currentDownloadProgress = currentDownloadingItem
-            ? downloadProgress.get(currentDownloadingItem.id) || 0
-            : 0;
+        const currentDownloadProgress = currentDownloadingItem ? downloadProgress.get(getItemId(currentDownloadingItem)) || 0 : 0;
 
         // اگر هیچ آیتمی در حال دانلود نیست اما آیتم‌های failed یا not downloaded وجود دارند
         const hasPendingItems = failedItems.length > 0 || notDownloadedItems.length > 0;
@@ -592,34 +786,17 @@ export const Advertisement: React.FC = () => {
                     {/* اگر کش نداریم و آفلاین هستیم → نمایش fallback image */}
                     {hasNoCacheAndOffline ? (
                         <>
-                            <Image 
-                                source={images.fallbackAdvertisement} 
-                                style={styles.fallbackImageInLoading} 
-                                contentFit="cover" 
-                                transition={300} 
-                            />
+                            <Image source={images.fallbackAdvertisement} style={styles.fallbackImageInLoading} contentFit="cover" transition={300} />
                             <View style={styles.offlineMessageContainer}>
                                 <Text style={styles.offlineMessageTitle}>🔴 آفلاین</Text>
-                                <Text style={styles.offlineMessageText}>
-                                    برای نمایش محتوا نیاز به اتصال اینترنت دارید
-                                </Text>
-                                <Text style={styles.offlineMessageSubtext}>
-                                    {totalItems} آیتم در انتظار دانلود
-                                </Text>
+                                <Text style={styles.offlineMessageText}>برای نمایش محتوا نیاز به اتصال اینترنت دارید</Text>
+                                <Text style={styles.offlineMessageSubtext}>{totalItems} آیتم در انتظار دانلود</Text>
                             </View>
                         </>
                     ) : (
                         <>
                             <ActivityIndicator size="large" color={isRetrying ? "#FFA726" : "#4CAF50"} />
-                            <Text style={styles.loadingText}>
-                                {hasNoCacheButOnline
-                                    ? "در حال دانلود محتوا برای اولین بار..."
-                                    : isRetrying
-                                      ? "در حال تلاش مجدد برای دانلود..."
-                                      : totalItems > 0
-                                        ? "در حال دانلود محتوا..."
-                                        : "در انتظار محتوا..."}
-                            </Text>
+                            <Text style={styles.loadingText}>{hasNoCacheButOnline ? "در حال دانلود محتوا برای اولین بار..." : isRetrying ? "در حال تلاش مجدد برای دانلود..." : totalItems > 0 ? "در حال دانلود محتوا..." : "در انتظار محتوا..."}</Text>
                             {totalItems > 0 && (
                                 <>
                                     <Text style={styles.loadingProgress}>
@@ -644,19 +821,9 @@ export const Advertisement: React.FC = () => {
                                         </View>
                                     ) : hasPendingItems ? (
                                         <View style={styles.downloadingItemContainer}>
-                                            <Text style={styles.downloadingItemTitle}>
-                                                ⏳ در انتظار اتصال اینترنت...
-                                            </Text>
-                                            {failedItems.length > 0 && (
-                                                <Text style={styles.retryInfo}>
-                                                    {failedItems.length} آیتم در انتظار تلاش مجدد
-                                                </Text>
-                                            )}
-                                            {notDownloadedItems.length > 0 && (
-                                                <Text style={styles.retryInfo}>
-                                                    {notDownloadedItems.length} آیتم در انتظار دانلود
-                                                </Text>
-                                            )}
+                                            <Text style={styles.downloadingItemTitle}>⏳ در انتظار اتصال اینترنت...</Text>
+                                            {failedItems.length > 0 && <Text style={styles.retryInfo}>{failedItems.length} آیتم در انتظار تلاش مجدد</Text>}
+                                            {notDownloadedItems.length > 0 && <Text style={styles.retryInfo}>{notDownloadedItems.length} آیتم در انتظار دانلود</Text>}
                                         </View>
                                     ) : null}
                                 </>
@@ -672,21 +839,35 @@ export const Advertisement: React.FC = () => {
         <View style={styles.container}>
             {currentItem.type === "video" ? (
                 <VideoPlayer
+                    key={`${currentItem?.id || "video"}-${playCountRef.current.get(currentItem?.id || "") || 0}`}
                     uri={localPath}
                     duration={currentItem.duration}
                     onEnded={advanceToNext}
                     isPaused={isPaused}
                     onProgress={handleVideoProgress}
-                    // Pass playCount برای ویدیوهای تکراری - بدون key برای جلوگیری از remount
-                    playCount={currentItem?.id ? (playCountRef.current.get(currentItem.id) || 0) : 0}
+                    // Pass playCount برای ویدیوهای تکراری - key اضافه شد تا وقتی playCount تغییر می‌کند، remount شود
+                    playCount={currentItem?.id ? playCountRef.current.get(currentItem.id) || 0 : 0}
                 />
             ) : (
-                <ImageDisplay key={`${currentItem.id}-${currentIndex}`} uri={localPath || ""} />
+                <ImageDisplay key={`${currentItem?.id || currentIndex}-${currentIndex}`} uri={localPath || ""} />
             )}
 
-            {/* Debug Overlay */}
-            {__DEV__ && (
+            {/* لایه شفاف برای تشخیص دوبار لمس - ویدیو/عکس لمس رو به والد نمی‌فرستن */}
+            {!isDebugPanelVisible && (
+                <TouchableWithoutFeedback onPress={handleDoubleTapArea}>
+                    <View style={styles.doubleTapOverlay} />
+                </TouchableWithoutFeedback>
+            )}
+
+            {/* Debug Overlay - نمایش در همه حالت‌ها (development و production) */}
+            {isDebugPanelVisible && (
                 <View style={styles.debugOverlay}>
+                    {/* دکمه بستن پنل دیباگ */}
+                    <TouchableOpacity style={styles.closeDebugButton} onPress={hideDebugPanel}>
+                        <Text style={styles.closeDebugButtonText}>✕ بستن</Text>
+                    </TouchableOpacity>
+                    {/* RAM، FPS، CPU، Cache */}
+                    <SystemMonitorPanel snapshot={systemSnapshot} />
                     <Text style={styles.debugText}>
                         📹 {currentItem.title} ({currentIndex + 1}/{readyItems.length})
                     </Text>
@@ -697,10 +878,29 @@ export const Advertisement: React.FC = () => {
                     <Text style={styles.debugText}>{isPaused ? "⏸️ PAUSED" : "▶️ PLAYING"}</Text>
                     <View style={styles.separator} />
 
+                    {/* لاگ‌ها */}
+                    <Text style={styles.debugText}>📊 لاگ‌ها:</Text>
+                    {logStats && (
+                        <>
+                            <Text style={styles.debugText}>📝 کل لاگ‌ها: {logStats.total_logs}</Text>
+                            <Text style={styles.debugText}>▶️ کل پخش: {logStats.total_plays}</Text>
+                            <Text style={styles.debugText}>⏳ Pending: {logStats.pending_sync_count}</Text>
+                            {logStats.last_sync_timestamp && <Text style={styles.debugText}>🔄 آخرین sync: {new Date(logStats.last_sync_timestamp).toLocaleTimeString("fa-IR")}</Text>}
+                        </>
+                    )}
+                    {contentLogSummary && (
+                        <>
+                            <Text style={styles.debugText}>▶️ پخش: {contentLogSummary.play_count} بار</Text>
+                            {contentLogSummary.last_played_at && <Text style={styles.debugText}>🕐 آخرین پخش: {new Date(contentLogSummary.last_played_at).toLocaleTimeString("fa-IR")}</Text>}
+                        </>
+                    )}
+                    <View style={styles.separator} />
+
                     <Text style={[styles.debugText, isOnline ? styles.onlineText : styles.offlineText]}>
                         {isOnline ? "🟢 Online" : "🔴 Offline"} ({connectionType})
                     </Text>
                     <View style={styles.separator} />
+                    <Text style={styles.debugText}>🔧 Sensor Enabled: {sensorEnabled ? "✅ YES" : "❌ NO (Manual Mode)"}</Text>
                     <Text style={styles.debugText}>🎯 Sensor: {isSensorConnected ? "✅ Connected" : "❌ Not Connected"}</Text>
                     {isSensorConnected && (
                         <>
@@ -709,7 +909,9 @@ export const Advertisement: React.FC = () => {
                             <Text style={styles.debugText}>📊 {statusText}</Text>
                         </>
                     )}
-                    {!isSensorConnected && <Text style={styles.debugText}>🎬 Auto-Play Mode</Text>}
+                    {!sensorEnabled && <Text style={styles.debugText}>🎬 Auto-Play Mode (Sensor Disabled)</Text>}
+                    {sensorEnabled && !isSensorConnected && <Text style={styles.debugText}>🎬 Auto-Play Mode (Sensor Not Connected)</Text>}
+                    {sensorEnabled && isSensorConnected && <Text style={styles.debugText}>🎯 Sensor Mode (Presence Required)</Text>}
                     <View style={styles.separator} />
                     <Text style={styles.debugText}>
                         📦 Ready: {readyItems.length}/{contentItems.length}
@@ -723,9 +925,7 @@ export const Advertisement: React.FC = () => {
                                     return status === "downloading";
                                 });
                                 const currentDownloadingItem = downloadingItems[0];
-                                const currentDownloadProgress = currentDownloadingItem
-                                    ? downloadProgress.get(currentDownloadingItem.id) || 0
-                                    : 0;
+                                const currentDownloadProgress = currentDownloadingItem ? downloadProgress.get(getItemId(currentDownloadingItem)) || 0 : 0;
                                 if (currentDownloadingItem) {
                                     return (
                                         <>
@@ -743,32 +943,68 @@ export const Advertisement: React.FC = () => {
                     <TouchableOpacity
                         style={styles.debugButton}
                         onPress={async () => {
-                            Alert.alert(
-                                "پاک کردن Cache",
-                                "آیا مطمئن هستید که می‌خواهید تمام cache را پاک کنید؟",
-                                [
-                                    { text: "لغو", style: "cancel" },
-                                    {
-                                        text: "پاک کردن",
-                                        style: "destructive",
-                                        onPress: async () => {
-                                            try {
-                                                await cacheManager.clearCache();
-                                                setLocalPaths(new Map());
-                                                setDownloadStatus(new Map());
-                                                setDownloadProgress(new Map());
-                                                setIsInitialized(false);
-                                                // Reinitialize
-                                                await cacheManager.initialize();
-                                                setIsInitialized(true);
-                                                Alert.alert("✅", "Cache پاک شد. اپ را refresh کنید.");
-                                            } catch (error) {
-                                                Alert.alert("❌", `خطا: ${error}`);
-                                            }
-                                        },
+                            const stats = await getStats();
+                            setLogStats(stats);
+
+                            if (currentItem?.id) {
+                                const summary = await getContentLogSummary(currentItem.id);
+                                setContentLogSummary(summary);
+                            }
+                        }}
+                    >
+                        <Text style={styles.debugButtonText}>🔄 به‌روزرسانی آمار لاگ</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.debugButton, styles.clearLogsButton]}
+                        onPress={() => {
+                            Alert.alert("پاک کردن لاگ‌ها", "همه لاگ‌ها پاک می‌شوند و از ۰ شروع می‌کنید. ادامه؟", [
+                                { text: "لغو", style: "cancel" },
+                                {
+                                    text: "پاک کردن",
+                                    style: "destructive",
+                                    onPress: async () => {
+                                        await clearAllLogs();
+                                        setLogStats(null);
+                                        setContentLogSummary(null);
+                                        const stats = await getStats();
+                                        setLogStats(stats);
+                                        if (currentItem?.id) {
+                                            const summary = await getContentLogSummary(currentItem.id);
+                                            setContentLogSummary(summary);
+                                        }
+                                        Alert.alert("✅", "لاگ‌ها پاک شدند. آمار از ۰ شروع شد.");
                                     },
-                                ],
-                            );
+                                },
+                            ]);
+                        }}
+                    >
+                        <Text style={styles.debugButtonText}>🗑️ پاک کردن لاگ‌ها (از ۰)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.debugButton}
+                        onPress={async () => {
+                            Alert.alert("پاک کردن Cache", "آیا مطمئن هستید که می‌خواهید تمام cache را پاک کنید؟", [
+                                { text: "لغو", style: "cancel" },
+                                {
+                                    text: "پاک کردن",
+                                    style: "destructive",
+                                    onPress: async () => {
+                                        try {
+                                            await cacheManager.clearCache();
+                                            setLocalPaths(new Map());
+                                            setDownloadStatus(new Map());
+                                            setDownloadProgress(new Map());
+                                            setIsInitialized(false);
+                                            // Reinitialize
+                                            await cacheManager.initialize();
+                                            setIsInitialized(true);
+                                            Alert.alert("✅", "Cache پاک شد. اپ را refresh کنید.");
+                                        } catch (error) {
+                                            Alert.alert("❌", `خطا: ${error}`);
+                                        }
+                                    },
+                                },
+                            ]);
                         }}
                     >
                         <Text style={styles.debugButtonText}>🗑️ پاک کردن Cache</Text>
@@ -785,6 +1021,15 @@ const styles = StyleSheet.create({
         backgroundColor: "#000",
         borderRadius: 14,
         overflow: "hidden",
+    },
+    doubleTapOverlay: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: "transparent",
+        zIndex: 10,
     },
     fallbackContainer: {
         flex: 1,
@@ -865,6 +1110,7 @@ const styles = StyleSheet.create({
         padding: 10,
         borderRadius: 8,
         minWidth: 200,
+        zIndex: 100,
     },
     debugText: {
         color: "#fff",
@@ -974,10 +1220,29 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "rgba(244, 67, 54, 0.5)",
     },
+    clearLogsButton: {
+        backgroundColor: "rgba(255, 152, 0, 0.3)",
+        borderColor: "rgba(255, 152, 0, 0.5)",
+    },
     debugButtonText: {
         color: "#F44336",
         fontSize: 11,
         fontFamily: "YekanBakh-SemiBold",
         textAlign: "center",
+    },
+    closeDebugButton: {
+        position: "absolute",
+        top: 5,
+        right: 5,
+        backgroundColor: "rgba(244, 67, 54, 0.8)",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 6,
+        zIndex: 1000,
+    },
+    closeDebugButtonText: {
+        color: "#FFFFFF",
+        fontSize: 11,
+        fontFamily: "YekanBakh-SemiBold",
     },
 });

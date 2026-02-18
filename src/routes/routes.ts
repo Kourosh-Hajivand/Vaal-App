@@ -19,6 +19,8 @@ export const routes = {
         contacts: () => "/api/devices/contacts",
         /** چک ورژن APK جدید — باید در backend پیاده‌سازی بشه */
         checkAppVersion: () => "/api/devices/app-version",
+        /** ارسال لاگ‌ها به سرور */
+        logs: () => "/api/devices/logs",
     },
     manager: {
         login: () => "/api/manager/login",

@@ -4,7 +4,7 @@
  * Shows Emergency component if emergency mode is enabled
  */
 import React, { useEffect, useState, useMemo } from "react";
-import { View, StyleSheet, ActivityIndicator } from "react-native";
+import { View, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
 import Animated, { FadeInRight, FadeOutLeft, Keyframe } from "react-native-reanimated";
 import { CustomText } from "../shared/CustomText";
 import { ThemedView } from "../shared/ThemedView";
@@ -70,7 +70,9 @@ export const Clock: React.FC = () => {
             setTime(getIranTime());
         }, 1000);
 
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+        };
     }, []);
 
     // Emergency mode
@@ -103,7 +105,7 @@ export const Clock: React.FC = () => {
     }
 
     return (
-        <ThemedView style={[styles.container, { borderColor: colors.border }]}>
+        <ThemedView style={[styles.container]}>
             {/* Background image */}
             {backgroundImage && !imageError && (
                 <View style={styles.backgroundContainer}>
@@ -116,14 +118,14 @@ export const Clock: React.FC = () => {
 
             {/* Content Container */}
             <View style={styles.contentContainer} onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}>
-                {contentWidth > 0 && <CloudLayer contentWidth={contentWidth} />}
+                {/* {contentWidth > 0 && <CloudLayer contentWidth={contentWidth} />} */}
                 {/* Header: Building info */}
                 <View style={styles.header}>
                     <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: isDark ? "white" : "rgba(0, 0, 0, 0.80)" }}>
-                        {device?.building?.manager_name ? `مدیریت ${device.building.manager_name}` : ""}
+                        {device?.building?.manager_name ? `${device.building.manager_name}` : ""}
                     </CustomText>
                     <CustomText fontType="YekanBakh" weight="Regular" size={12} style={{ color: isDark ? "white" : "rgba(0, 0, 0, 0.80)" }}>
-                        {device?.building?.name ? `ساختمان ${device.building.name}` : ""}
+                        {device?.building?.name ? `${device.building.name}` : ""}
                     </CustomText>
                 </View>
 
@@ -207,6 +209,8 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         overflow: "hidden",
         minHeight: 400,
+        shadowOpacity: 0,
+        elevation: 0,
     },
     backgroundContainer: {
         position: "absolute",

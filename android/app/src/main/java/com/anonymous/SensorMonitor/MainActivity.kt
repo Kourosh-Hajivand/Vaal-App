@@ -1,8 +1,9 @@
 package com.anonymous.SensorMonitor
 import expo.modules.splashscreen.SplashScreenManager
 
-import android.os.Build
+import android.content.Intent
 import android.os.Bundle
+import android.os.Process
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -12,7 +13,22 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Native crash handler: auto-restart app on crash
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+      android.util.Log.e("MainActivity", "Uncaught exception - restarting app", throwable)
+      try {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
+        startActivity(intent)
+      } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Failed to restart", e)
+      }
+      Process.killProcess(Process.myPid())
+      System.exit(1)
+    }
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
     // This is required for expo-splash-screen.
@@ -45,21 +61,14 @@ class MainActivity : ReactActivity() {
   }
 
   /**
-    * Align the back button behavior with Android S
-    * where moving root activities to background instead of finishing activities.
-    * @see <a href="https://developer.android.com/reference/android/app/Activity#onBackPressed()">onBackPressed</a>
+    * Kiosk mode: ignore back button to prevent exiting app
     */
-  override fun invokeDefaultOnBackPressed() {
-      if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-          if (!moveTaskToBack(false)) {
-              // For non-root activities, use the default implementation to finish them.
-              super.invokeDefaultOnBackPressed()
-          }
-          return
-      }
+  @Deprecated("Deprecated in Java")
+  override fun onBackPressed() {
+    // Do nothing - prevent exit in kiosk mode
+  }
 
-      // Use the default back button implementation on Android S
-      // because it's doing more than [Activity.moveTaskToBack] in fact.
-      super.invokeDefaultOnBackPressed()
+  override fun invokeDefaultOnBackPressed() {
+    // Do nothing - prevent exit in kiosk mode
   }
 }

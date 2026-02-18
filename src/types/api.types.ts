@@ -118,6 +118,7 @@ export interface DeviceResource {
     emergency_bg_color?: string;
     background_url?: string | null;
     night_background_url?: string | null;
+    sensor_enabled?: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -246,7 +247,8 @@ export interface Weather {
 
 /** آیتم محتوا در پاسخ manifest (مستقیم از data.content) */
 export interface ManifestContentItem {
-    id: string;
+    id?: string | null;
+    content_id?: string | null;
     title: string;
     type: string;
     file_url: string;
@@ -259,7 +261,7 @@ export interface ManifestContentItem {
 }
 
 export interface ManifestResponse {
-    device_id: string;
+    device_id?: string | null;
     layout?: Record<string, unknown> | null;
     /** لیست محتوا (اولویت نسبت به playlist) */
     content?: ManifestContentItem[] | null;

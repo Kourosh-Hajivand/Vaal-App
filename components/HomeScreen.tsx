@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View, StatusBar, TouchableOpacity, Text } from "react-native";
 import { tokenService, deviceService } from "../src/services";
 import { pairCodeService } from "../src/services/pairCodeService";
@@ -9,6 +9,7 @@ import { useTheme } from "../src/contexts/ThemeContext";
 import { useDeviceAuth } from "@/src/hooks";
 import { useOTAUpdate } from "@/src/hooks/useOTAUpdate";
 import { useAppUpdate } from "@/src/hooks/useAppUpdate";
+import { DebugPanelProvider } from "../src/contexts/DebugPanelContext";
 
 export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
     const { colors, mode } = useTheme();
@@ -30,8 +31,6 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
     });
 
     const [showTestScreen, setShowTestScreen] = useState(false);
-    const tapCountRef = useRef(0);
-    const tapTimerRef = useRef<number | null>(null);
 
     // Token validation هر 5 دقیقه
     useEffect(() => {
@@ -58,36 +57,8 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
 
         return () => {
             clearInterval(interval);
-            // Cleanup tap timer
-            if (tapTimerRef.current) {
-                clearTimeout(tapTimerRef.current);
-                tapTimerRef.current = null;
-            }
         };
     }, [onLogout]);
-
-    // Triple Tap handler برای باز کردن Test Screen
-    const handleClockTap = () => {
-        tapCountRef.current += 1;
-
-        // Clear previous timer
-        if (tapTimerRef.current) {
-            clearTimeout(tapTimerRef.current);
-        }
-
-        // اگر 3 بار tap شد، Test Screen رو نشون بده
-        if (tapCountRef.current === 3) {
-            console.log("🔧 Opening Sensor Test Screen");
-            setShowTestScreen(true);
-            tapCountRef.current = 0;
-            return;
-        }
-
-        // Reset tap count بعد از 1 ثانیه
-        tapTimerRef.current = setTimeout(() => {
-            tapCountRef.current = 0;
-        }, 1000);
-    };
 
     if (showTestScreen) {
         return (
@@ -105,23 +76,25 @@ export default function HomeScreen({ onLogout }: { onLogout: () => void }) {
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: "black" }]}>
-            {/* StatusBar */}
-            <StatusBar hidden={true} barStyle={mode === "dark" ? "light-content" : "dark-content"} />
+        <DebugPanelProvider>
+            <View style={[styles.container, { backgroundColor: "black" }]}>
+                {/* StatusBar */}
+                <StatusBar hidden={true} barStyle={mode === "dark" ? "light-content" : "dark-content"} />
 
-            {/* Layout: Advertisement (55%) + Clock (45%) */}
-            <View style={styles.mainLayout}>
-                {/* Advertisement Section (55%) */}
-                <View style={styles.advertisementSection}>
-                    <Advertisement />
-                </View>
+                {/* Layout: Advertisement (55%) + Clock (45%) */}
+                <View style={styles.mainLayout}>
+                    {/* Advertisement Section (55%) */}
+                    <View style={styles.advertisementSection}>
+                        <Advertisement />
+                    </View>
 
-                {/* Clock Section (45%) - Triple Tap to open Test Screen */}
-                <View style={styles.clockSection}>
-                    <Clock />
+                    {/* Clock Section (45%) - Triple Tap to open Test Screen */}
+                    <View style={styles.clockSection}>
+                        <Clock />
+                    </View>
                 </View>
             </View>
-        </View>
+        </DebugPanelProvider>
     );
 }
 
@@ -141,6 +114,8 @@ const styles = StyleSheet.create({
     },
     clockSection: {
         flex: 50,
+        shadowOpacity: 0,
+        elevation: 0,
     },
     backButton: {
         position: "absolute",
