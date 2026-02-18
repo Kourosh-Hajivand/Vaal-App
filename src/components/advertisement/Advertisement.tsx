@@ -840,7 +840,7 @@ export const Advertisement: React.FC = () => {
             {currentItem.type === "video" ? (
                 <VideoPlayer
                     key="advertisement-video"
-                    instanceId={`${currentIndex}-${currentItem.id}`}
+                    instanceId={`${currentIndex}-${currentItem.id}-${currentItem?.id ? playCountRef.current.get(currentItem.id) ?? 0 : 0}`}
                     uri={localPath}
                     duration={currentItem.duration}
                     onEnded={advanceToNext}
