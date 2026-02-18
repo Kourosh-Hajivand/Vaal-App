@@ -839,13 +839,13 @@ export const Advertisement: React.FC = () => {
         <View style={styles.container}>
             {currentItem.type === "video" ? (
                 <VideoPlayer
-                    key={`${currentItem?.id || "video"}-${playCountRef.current.get(currentItem?.id || "") || 0}`}
+                    key="advertisement-video"
+                    instanceId={`${currentIndex}-${currentItem.id}`}
                     uri={localPath}
                     duration={currentItem.duration}
                     onEnded={advanceToNext}
                     isPaused={isPaused}
                     onProgress={handleVideoProgress}
-                    // Pass playCount برای ویدیوهای تکراری - key اضافه شد تا وقتی playCount تغییر می‌کند، remount شود
                     playCount={currentItem?.id ? playCountRef.current.get(currentItem.id) || 0 : 0}
                 />
             ) : (

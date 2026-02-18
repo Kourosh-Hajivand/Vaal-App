@@ -75,8 +75,22 @@ class ErrorHandler {
             timestamp: errorLog.timestamp,
         });
 
-        // In production, you might want to send to crash reporting service
-        // Example: Sentry.captureException(error);
+        // ارسال به بک‌اند (با device_id اگر ست شده) تا بدانی کدام مانیتور crash کرده
+        if (Platform.OS !== "web") {
+            try {
+                const { logManager } = require("../utils/logging/logManager");
+                logManager
+                    .logError("other", errorLog.message, errorLog.stack, {
+                        reason: "js_error",
+                        isFatal: !!isFatal,
+                        platform: Platform.OS,
+                    })
+                    .then(() => logManager.flush())
+                    .catch(() => {});
+            } catch (_) {
+                // ignore if logManager not available
+            }
+        }
 
         // Keep only last 10 errors
         if (this.errorLogs.length > 10) {

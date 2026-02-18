@@ -18,6 +18,8 @@ import { useDeviceToken } from "./src/hooks/use-device-token";
 import { clearAllCaches } from "./src/utils/cache/clearAllCaches";
 import { logService } from "./src/services/logService";
 import { logManager } from "./src/utils/logging/logManager";
+import { startMemoryPressureMonitor } from "./src/utils/memoryPressureMonitor";
+import { useDeviceInfo } from "./src/hooks/device/useDeviceInfo";
 import OfflineScreen from "./components/OfflineScreen";
 import HomeScreen from "./components/HomeScreen";
 // Import asset index برای اطمینان از bundle شدن همه asset ها در production
@@ -48,7 +50,12 @@ const asyncStoragePersister = createAsyncStoragePersister({
     throttleTime: 2000, // هر 2 ثانیه persist (برای performance)
 });
 
-export default function App() {
+const persistOptions = { persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 };
+
+/**
+ * محتوای اصلی اپ — داخل Provider رندر می‌شود تا useDeviceInfo/useQuery از اولین رندر در دسترس باشند.
+ */
+function AppContent() {
     // Load custom fonts
     const [fontsLoaded, fontError] = useFonts({
         "YekanBakh-Regular": require("./assets/fonts/YekanBakh-Regular.ttf"),
@@ -59,6 +66,14 @@ export default function App() {
 
     // Monitor token changes (reactive)
     const { hasToken } = useDeviceToken();
+    const { data: deviceData } = useDeviceInfo();
+
+    // هرچه زودتر device_id را برای لاگ‌ها (مثلاً memory_critical) ست کن
+    useEffect(() => {
+        if (deviceData?.id) {
+            logManager.setDeviceId(deviceData.id);
+        }
+    }, [deviceData?.id]);
 
     const [screen, setScreen] = useState("loading");
     const [isChecking, setIsChecking] = useState(true);
@@ -327,6 +342,9 @@ export default function App() {
         // Sync اولیه
         syncLogs();
 
+        // مانیتور فشار حافظه روی دستگاه‌های کم‌رم: لاگ به بک‌اند + در صورت نیاز ریستارت نرم
+        startMemoryPressureMonitor();
+
         return () => {
             if (logSyncIntervalRef.current) {
                 clearInterval(logSyncIntervalRef.current);
@@ -461,55 +479,35 @@ export default function App() {
         return null;
     }
 
-    // Render: Loading Screen - نگه داشتن splash screen تا ready بشه
-    if (isChecking) {
-        // نگه داشتن splash screen native (بجای نمایش loading سیاه)
-        return null;
-    }
+    const errorFallback = (
+        <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
+            <Text style={styles.errorSubtext}>در حال راه‌اندازی مجدد خودکار...</Text>
+        </View>
+    );
 
-    // Render: Offline Screen
-    if (screen === "offline") {
-        return (
-            <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
-                <ThemeProvider>
-                    <ErrorBoundary
-                        fallback={
-                            <View style={styles.errorContainer}>
-                                <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
-                                <Text style={styles.errorSubtext}>در حال راه‌اندازی مجدد خودکار...</Text>
-                            </View>
-                        }
-                    >
-                        <AutoRefetchOnReconnect />
-                        <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />
-                    </ErrorBoundary>
-                </ThemeProvider>
-            </PersistQueryClientProvider>
-        );
-    }
+    const content = isChecking ? null : (
+        <ErrorBoundary fallback={errorFallback}>
+            {screen === "offline" && <OfflineScreen onConnected={(onLog) => handleConnected(onLog)} />}
+            {screen === "home" && <HomeScreen onLogout={handleLogout} />}
+            {screen === "loading" && null}
+        </ErrorBoundary>
+    );
 
-    // Render: Home Screen
-    if (screen === "home") {
-        return (
-            <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 7 * 24 * 60 * 60 * 1000 }}>
-                <ThemeProvider>
-                    <ErrorBoundary
-                        fallback={
-                            <View style={styles.errorContainer}>
-                                <Text style={styles.errorText}>خطا در اجرای برنامه</Text>
-                                <Text style={styles.errorSubtext}>در حال راه‌اندازی مجدد خودکار...</Text>
-                            </View>
-                        }
-                    >
-                        <AutoRefetchOnReconnect />
-                        <HomeScreen onLogout={handleLogout} />
-                    </ErrorBoundary>
-                </ThemeProvider>
-            </PersistQueryClientProvider>
-        );
-    }
+    return (
+        <ThemeProvider>
+            <AutoRefetchOnReconnect />
+            {content}
+        </ThemeProvider>
+    );
+}
 
-    return null;
+export default function App() {
+    return (
+        <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+            <AppContent />
+        </PersistQueryClientProvider>
+    );
 }
 
 const styles = StyleSheet.create({

@@ -8,16 +8,17 @@ import Video, { type VideoRef } from "react-native-video";
 import { logManager } from "@/src/utils/logging/logManager";
 
 interface VideoPlayerProps {
+    instanceId: string;
     uri: string;
     duration: number; // Duration in seconds (از API)
     onEnded: () => void;
     isPaused: boolean;
     onError?: (error: any) => void;
     onProgress?: (currentTime: number) => void; // برای نمایش countdown
-    playCount?: number; // تعداد دفعاتی که این ویدیو پخش شده (برای ویدیوهای تکراری)
+    playCount?: number; // تعداد دفعاتی که این ویدیو پخش شده (برای لاگ)
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded, isPaused, onError, onProgress, playCount = 0 }) => {
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ instanceId, uri, duration, onEnded, isPaused, onError, onProgress, playCount = 0 }) => {
     const videoRef = useRef<VideoRef>(null);
     const [hasEnded, setHasEnded] = useState(false);
     const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
@@ -25,52 +26,73 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
     const pausedAtRef = useRef<number>(0);
     const elapsedBeforePauseRef = useRef<number>(0);
     const previousUriRef = useRef<string>("");
-    const previousPlayCountRef = useRef<number>(0);
     const isReadyForDisplayRef = useRef<boolean>(false);
     const [isPreparing, setIsPreparing] = useState(false); // برای pause کردن ویدیو تا آماده بشه
     const hasSeekedRef = useRef<boolean>(false); // برای جلوگیری از seek مکرر
     const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // برای clear کردن timeout seek
+    const currentInstanceIdRef = useRef<string>(instanceId); // برای نادیده گرفتن onEnd ویدیوی قبلی
+    const prepareFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Reset state when URI changes or playCount changes (برای ویدیوهای تکراری)
+    // FULL INTERNAL RESET — triggered by instanceId (no remount). Handles same URI consecutively and single-video loop.
     useEffect(() => {
-        const uriChanged = previousUriRef.current !== uri;
-        // حذف شرط playCount > 0 تا حتی وقتی playCount از 0 به 1 تغییر می‌کند، reset شود
-        const playCountChanged = previousPlayCountRef.current !== playCount;
+        const prevUri = previousUriRef.current;
+        currentInstanceIdRef.current = instanceId;
+        previousUriRef.current = uri;
 
-        if (uriChanged || playCountChanged) {
-            const wasDifferentUri = previousUriRef.current !== "";
+        setHasEnded(false);
+        setHasStartedPlaying(false);
 
-            if (uriChanged) {
-                previousUriRef.current = uri;
-            }
-            if (playCountChanged) {
-                previousPlayCountRef.current = playCount;
-            }
+        elapsedBeforePauseRef.current = 0;
+        pausedAtRef.current = 0;
 
-            // Reset all state
-            setHasEnded(false);
-            setHasStartedPlaying(false);
-            elapsedBeforePauseRef.current = 0;
-            pausedAtRef.current = 0;
-            isReadyForDisplayRef.current = false;
-            hasSeekedRef.current = false; // reset seek flag
-            setIsPreparing(true); // pause کن تا آماده بشه
+        isReadyForDisplayRef.current = false;
+        hasSeekedRef.current = false;
 
-            // Clear any existing timers
-            if (durationTimerRef.current) {
-                clearTimeout(durationTimerRef.current);
-                durationTimerRef.current = null;
-            }
-            if (seekTimeoutRef.current) {
-                clearTimeout(seekTimeoutRef.current);
-                seekTimeoutRef.current = null;
-            }
+        if (seekTimeoutRef.current) {
+            clearTimeout(seekTimeoutRef.current);
+            seekTimeoutRef.current = null;
         }
-    }, [uri, playCount]);
+        if (durationTimerRef.current) {
+            clearTimeout(durationTimerRef.current);
+            durationTimerRef.current = null;
+        }
+        if (prepareFallbackRef.current) {
+            clearTimeout(prepareFallbackRef.current);
+            prepareFallbackRef.current = null;
+        }
+
+        setIsPreparing(true);
+
+        // فقط وقتی همان ویدیو دوباره پخش میشه (لوپ) بلافاصله seek کن؛ ویدیوی جدید صبر کن تا onReadyForDisplay
+        if (prevUri === uri && videoRef.current) {
+            videoRef.current.seek(0);
+        }
+
+        // Fallback: اگر بعد از تغییر منبع onReadyForDisplay نیومد، بعد از ۱.۲ ثانیه پخش رو آزاد کن
+        prepareFallbackRef.current = setTimeout(() => {
+            prepareFallbackRef.current = null;
+            setIsPreparing((stillPreparing) => {
+                if (stillPreparing && videoRef.current) {
+                    videoRef.current.seek(0);
+                }
+                return false;
+            });
+        }, 1200);
+
+        return () => {
+            if (prepareFallbackRef.current) {
+                clearTimeout(prepareFallbackRef.current);
+                prepareFallbackRef.current = null;
+            }
+        };
+    }, [instanceId, uri]);
 
     // Handle end callback - must be defined before useEffect that uses it
     const handleEnd = useCallback(() => {
-        // Check if URI has changed (prevent old video from calling onEnded)
+        // فقط onEnd مربوط به همین instance را بپذیر (از onEnd ویدیوی قبلی بعد از تعویض صرف‌نظر کن)
+        if (currentInstanceIdRef.current !== instanceId) {
+            return;
+        }
         if (previousUriRef.current !== uri) {
             return;
         }
@@ -83,7 +105,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ uri, duration, onEnded
             }
             onEnded();
         }
-    }, [uri, onEnded, hasEnded]);
+    }, [uri, instanceId, onEnded, hasEnded]);
 
     // ⏰ Custom duration timer: بعد از duration مشخص شده، force advance
     useEffect(() => {
